@@ -1,0 +1,42 @@
+/* Modernized App.css for professional look */
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+/* Utility classes */
+.text-center {
+  text-align: center;
+}
+.mt-2 {
+  margin-top: 1rem;
+}
+.mb-2 {
+  margin-bottom: 1rem;
+}
+.p-2 {
+  padding: 1rem;
+}
+
+/* Card shadow for custom elements */
+.card-shadow {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  border-radius: 12px;
+}
+
+/* Button styles for non-MUI buttons */
+.btn-primary {
+  background: #1976d2;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.6em 1.5em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-primary:hover {
+  background: #1565c0;
+}
