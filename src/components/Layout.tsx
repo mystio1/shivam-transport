@@ -31,7 +31,8 @@ const Layout = ({ children }: LayoutProps) => {
           display: 'flex',
           flexDirection: 'column',
           flexGrow: 1,
-          width: { xs: '100%', sm: `calc(100% - 260px)` },
+          width: '100%',
+          '@media (min-width:1024px)': { width: 'calc(100% - 260px)' },
           overflowX: 'hidden',
           backgroundColor: '#0B0E11',
         }}

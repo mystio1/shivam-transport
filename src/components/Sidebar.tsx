@@ -9,7 +9,7 @@ import {
   Typography,
   Divider,
 } from '@mui/material';
-import { Dashboard, People, AssignmentTurnedIn, Send, Settings } from '@mui/icons-material';
+import { Dashboard, People, AssignmentTurnedIn, Send, Settings, LocalShipping, AddCircle, ReceiptLong } from '@mui/icons-material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
 
@@ -30,11 +30,14 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }: SidebarProps) => {
       ? [
           { text: 'Dashboard', icon: <Dashboard />, path: '/' },
           { text: 'Customers', icon: <People />, path: '/customers' },
+          { text: 'Drivers', icon: <LocalShipping />, path: '/drivers' },
+          { text: 'Add Trip', icon: <AddCircle />, path: '/add-trip' },
           {
             text: `Approvals${pendingTrips.length ? ` (${pendingTrips.length})` : ''}`,
             icon: <AssignmentTurnedIn />,
             path: '/approvals',
           },
+          { text: 'My Bills', icon: <ReceiptLong />, path: '/my-bills' },
           { text: 'Bill Branding & Settings', icon: <Settings />, path: '/settings' },
         ]
       : [
@@ -106,10 +109,15 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }: SidebarProps) => {
     </>
   );
 
+  // Fixed sidebar only from 1024px up (desktop/laptop); phone AND tablet (below that) get the
+  // slide-out drawer instead — a plain MUI breakpoint alias would cut over at 600 or 900px,
+  // so this uses an explicit media query to land exactly on the 1024px tablet/desktop line.
+  const DESKTOP_QUERY = '@media (min-width:1024px)';
+
   return (
     <Box
       component="nav"
-      sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}
+      sx={{ width: 0, flexShrink: 0, [DESKTOP_QUERY]: { width: drawerWidth, flexShrink: 0 } }}
       aria-label="mailbox folders"
     >
       <Drawer
@@ -120,7 +128,8 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }: SidebarProps) => {
           keepMounted: true, // Better open performance on mobile.
         }}
         sx={{
-          display: { xs: 'block', sm: 'none' },
+          display: 'block',
+          [DESKTOP_QUERY]: { display: 'none' },
           '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth, backgroundColor: '#0B0E11', borderRight: '1px solid #2B3139' },
         }}
       >
@@ -129,7 +138,8 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }: SidebarProps) => {
       <Drawer
         variant="permanent"
         sx={{
-          display: { xs: 'none', sm: 'block' },
+          display: 'none',
+          [DESKTOP_QUERY]: { display: 'block' },
           '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth, backgroundColor: '#0B0E11', borderRight: '1px solid #2B3139' },
         }}
         open

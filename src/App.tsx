@@ -5,6 +5,7 @@ import { useAppContext } from './context/AppContext';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import Layout from './components/Layout';
+import ScrollToTop from './components/ScrollToTop';
 import Dashboard from './components/Dashboard';
 import CustomerList from './components/CustomerList';
 import CustomerDetails from './pages/CustomerDetails';
@@ -13,6 +14,11 @@ import AdminTripApprovals from './pages/AdminTripApprovals';
 import DriverSubmitTrip from './pages/DriverSubmitTrip';
 import DriverTrips from './pages/DriverTrips';
 import BrandingSettings from './pages/BrandingSettings';
+import DriverList from './pages/DriverList';
+import DriverDetails from './pages/DriverDetails';
+import AllTrips from './pages/AllTrips';
+import AddTrip from './pages/AddTrip';
+import MyBills from './pages/MyBills';
 import { useMemo } from 'react';
 import type {} from '@mui/x-date-pickers/AdapterDayjs';
 
@@ -186,6 +192,7 @@ const AppWithTheme = () => {
       <CssBaseline />
       <Box sx={{ color: 'text.primary', minHeight: '100vh', background: theme.palette.background.default }}>
         <Router>
+          <ScrollToTop />
           <Layout>
             <Routes>
               {user.role === 'admin' ? (
@@ -194,6 +201,11 @@ const AppWithTheme = () => {
                   <Route path="/customers" element={<CustomerList />} />
                   <Route path="/approvals" element={<AdminTripApprovals />} />
                   <Route path="/customer/:id" element={<CustomerDetails />} />
+                  <Route path="/drivers" element={<DriverList />} />
+                  <Route path="/driver/:id" element={<DriverDetails />} />
+                  <Route path="/trips" element={<AllTrips />} />
+                  <Route path="/add-trip" element={<AddTrip />} />
+                  <Route path="/my-bills" element={<MyBills />} />
                   <Route path="/settings" element={<BrandingSettings />} />
                 </>
               ) : (

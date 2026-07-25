@@ -6,6 +6,7 @@ import type {
   Branding,
   Customer,
   CustomerWithBalance,
+  SavedBill,
   Trip,
   TripInput,
 } from '../types';
@@ -57,6 +58,8 @@ interface AppContextType {
   trips: Trip[];
   pendingTrips: Trip[];
   allTrips: Trip[];
+  drivers: AppUser[];
+  getDriverTrips: (driverId: string) => Trip[];
   user: AppUser | null;
   group: AppGroup | null;
   branding: Branding | null;
@@ -65,6 +68,14 @@ interface AppContextType {
   addCustomer: (customer: Omit<Customer, 'id'> | string) => Promise<string>;
   addCustomerWithCallback: (customer: Omit<Customer, 'id'>, callback: (id: string) => void) => void;
   updateCustomer: (customerId: string, updates: Partial<Customer>) => Promise<void>;
+  addCustomerAdvance: (customerId: string, amount: number, note?: string, date?: string) => Promise<void>;
+  deleteCustomerAdvance: (customerId: string, advanceId: string) => Promise<void>;
+  permanentlyDeleteCustomerAdvance: (customerId: string, advanceId: string) => Promise<void>;
+  mergeCustomer: (sourceId: string, intoCustomerId: string) => Promise<void>;
+  recordTripPayment: (
+    tripId: string,
+    input: { amount?: number; fullyPaid?: boolean; fromAdvance?: boolean; paymentMode?: string },
+  ) => Promise<void>;
   addTrip: (trip: Omit<Trip, 'id'>) => Promise<string>;
   submitDriverTrip: (trip: Omit<Trip, 'id' | 'customerId'> & { customerId?: string }) => Promise<{ queued: boolean }>;
   pendingSyncCount: number;
@@ -89,6 +100,11 @@ interface AppContextType {
   saveServerUrl: (url: string) => void;
   themeMode: PaletteMode;
   toggleThemeMode: () => void;
+  bills: SavedBill[];
+  saveBill: (input: Omit<SavedBill, 'id' | 'groupCode' | 'createdAt' | 'createdBy' | 'customerName'>) => Promise<SavedBill>;
+  deleteBill: (billId: string) => Promise<void>;
+  permanentlyDeleteBill: (billId: string) => Promise<void>;
+  restoreBackup: (customers: unknown[], trips: unknown[]) => Promise<{ customersImported: number; tripsImported: number }>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -140,6 +156,7 @@ function normalizeTripInput(tripData: Omit<Trip, 'id'>): TripInput {
 export const AppProvider = ({ children }: AppProviderProps) => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [allTrips, setAllTrips]   = useState<Trip[]>([]);
+  const [drivers, setDrivers]     = useState<AppUser[]>([]);
   const [isLoading, setIsLoading]   = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [themeMode, setThemeMode]   = useState<PaletteMode>('dark');
@@ -149,6 +166,7 @@ export const AppProvider = ({ children }: AppProviderProps) => {
   const [serverUrl, setServerUrlState] = useState<string>(getApiBase());
   const [pendingSyncCount, setPendingSyncCount] = useState<number>(() => getQueueCount());
   const [isSyncingOffline, setIsSyncingOffline] = useState(false);
+  const [bills, setBills] = useState<SavedBill[]>([]);
 
   const trips = useMemo(() => allTrips.filter(approvedTrip), [allTrips]);
   const pendingTrips = useMemo(
@@ -166,6 +184,8 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     setCustomers([]);
     setAllTrips([]);
     setBranding(null);
+    setDrivers([]);
+    setBills([]);
   }, []);
 
   // ── Data loading ───────────────────────────────────────────────────────
@@ -174,14 +194,18 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     if (!token) return;
     setIsLoading(true);
     try {
-      const [customersResp, tripsResp, brandingResp] = await Promise.all([
+      const [customersResp, tripsResp, brandingResp, driversResp, billsResp] = await Promise.all([
         apiRequest<{ customers: Customer[] }>('/api/customers'),
         apiRequest<{ trips: Trip[] }>('/api/trips'),
         apiRequest<{ branding: Branding }>('/api/branding').catch(() => null),
+        apiRequest<{ drivers: AppUser[] }>('/api/drivers').catch(() => null),
+        apiRequest<{ bills: SavedBill[] }>('/api/bills').catch(() => null),
       ]);
       setCustomers(customersResp.customers);
       setAllTrips(tripsResp.trips);
       if (brandingResp) setBranding(brandingResp.branding);
+      if (driversResp) setDrivers(driversResp.drivers);
+      if (billsResp) setBills(billsResp.bills);
     } finally {
       setIsLoading(false);
     }
@@ -283,6 +307,36 @@ export const AppProvider = ({ children }: AppProviderProps) => {
 
   const deleteCustomer = async (customerId: string) => {
     await apiRequest<{ ok: boolean }>(`/api/customers/${customerId}`, { method: 'DELETE' });
+    await refreshData();
+  };
+
+  const addCustomerAdvance = async (customerId: string, amount: number, note?: string, date?: string) => {
+    await apiRequest<{ customer: Customer }>(`/api/customers/${customerId}/advance`, {
+      method: 'POST',
+      body: { amount, note, date },
+    });
+    await refreshData();
+  };
+
+  const deleteCustomerAdvance = async (customerId: string, advanceId: string) => {
+    await apiRequest<{ customer: Customer }>(`/api/customers/${customerId}/advance/${advanceId}`, {
+      method: 'DELETE',
+    });
+    await refreshData();
+  };
+
+  const permanentlyDeleteCustomerAdvance = async (customerId: string, advanceId: string) => {
+    await apiRequest<{ customer: Customer }>(`/api/customers/${customerId}/advance/${advanceId}/permanent`, {
+      method: 'DELETE',
+    });
+    await refreshData();
+  };
+
+  const mergeCustomer = async (sourceId: string, intoCustomerId: string) => {
+    await apiRequest<{ customer: Customer }>(`/api/customers/${sourceId}/merge`, {
+      method: 'POST',
+      body: { intoCustomerId },
+    });
     await refreshData();
   };
 
@@ -388,6 +442,17 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     await updateTrip(tripId, { isPaid, ...(paymentMode ? { paymentMode } : {}) } as Partial<Trip>);
   };
 
+  const recordTripPayment = async (
+    tripId: string,
+    input: { amount?: number; fullyPaid?: boolean; fromAdvance?: boolean; paymentMode?: string },
+  ) => {
+    await apiRequest<{ trip: Trip }>(`/api/trips/${tripId}/payment`, {
+      method: 'POST',
+      body: input,
+    });
+    await refreshData();
+  };
+
   // ── Branding / bill theme ───────────────────────────────────────────────
   const updateBranding = async (updates: Partial<Branding>) => {
     const response = await apiRequest<{ branding: Branding }>('/api/branding', {
@@ -402,6 +467,38 @@ export const AppProvider = ({ children }: AppProviderProps) => {
       method: 'POST',
     });
     return response.invoiceNumber;
+  };
+
+  // ── Saved bills ("My Bills") ─────────────────────────────────────────────
+  const saveBill = async (
+    input: Omit<SavedBill, 'id' | 'groupCode' | 'createdAt' | 'createdBy' | 'customerName'>,
+  ): Promise<SavedBill> => {
+    const response = await apiRequest<{ bill: SavedBill }>('/api/bills', {
+      method: 'POST',
+      body: input,
+    });
+    setBills(prev => [response.bill, ...prev]);
+    return response.bill;
+  };
+
+  const deleteBill = async (billId: string) => {
+    const response = await apiRequest<{ bill: SavedBill }>(`/api/bills/${billId}`, { method: 'DELETE' });
+    setBills(prev => prev.map(b => (b.id === billId ? response.bill : b)));
+  };
+
+  const permanentlyDeleteBill = async (billId: string) => {
+    await apiRequest<{ ok: boolean }>(`/api/bills/${billId}/permanent`, { method: 'DELETE' });
+    setBills(prev => prev.filter(b => b.id !== billId));
+  };
+
+  // ── Restore from a downloaded backup file ───────────────────────────────
+  const restoreBackup = async (customers: unknown[], trips: unknown[]) => {
+    const response = await apiRequest<{ customersImported: number; tripsImported: number }>('/api/restore', {
+      method: 'POST',
+      body: { customers, trips },
+    });
+    await refreshData();
+    return response;
   };
 
   // ── Notifications ───────────────────────────────────────────────────────
@@ -421,6 +518,9 @@ export const AppProvider = ({ children }: AppProviderProps) => {
   // ── Query helpers ──────────────────────────────────────────────────────
   const getCustomerTrips = (customerId: string): Trip[] =>
     trips.filter(t => t.customerId === customerId);
+
+  const getDriverTrips = (driverId: string): Trip[] =>
+    trips.filter(t => t.driverId === driverId);
 
   const getFilteredTrips = (date: string | null): Trip[] => {
     if (!date) return trips;
@@ -448,16 +548,19 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     <AppContext.Provider
       value={{
         customers, trips, pendingTrips, allTrips,
+        drivers, getDriverTrips,
         user, group, branding,
         authLoading, isLoading,
         addCustomer, addCustomerWithCallback, updateCustomer,
+        addCustomerAdvance, deleteCustomerAdvance, permanentlyDeleteCustomerAdvance, mergeCustomer,
         addTrip, submitDriverTrip,
         pendingSyncCount, isSyncingOffline, flushPendingTrips,
-        approveTrip, rejectTrip, updateTrip,
+        approveTrip, rejectTrip, updateTrip, recordTripPayment,
         getCustomerTrips, getFilteredTrips,
         searchCustomers, updateTripPaymentStatus,
         deleteCustomer,
         updateBranding, getNextInvoiceNumber, sendBillEmail,
+        bills, saveBill, deleteBill, permanentlyDeleteBill, restoreBackup,
         serverUrl, saveServerUrl,
         themeMode, toggleThemeMode,
         login, signup, logout,

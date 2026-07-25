@@ -3,8 +3,6 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import MenuIcon from '@mui/icons-material/Menu';
 import BackupIcon from '@mui/icons-material/Backup';
 import RestoreIcon from '@mui/icons-material/Restore';
-import Brightness4Icon from '@mui/icons-material/Brightness4';
-import Brightness7Icon from '@mui/icons-material/Brightness7';
 import { useState } from 'react';
 import DataBackupRestore from './DataBackupRestore';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -17,7 +15,7 @@ const Header = ({ handleDrawerToggle }: HeaderProps) => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [backupDialogOpen, setBackupDialogOpen] = useState(false);
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
-  const { themeMode, toggleThemeMode, user, group, logout } = useAppContext();
+  const { user, group, logout } = useAppContext();
   
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -47,7 +45,7 @@ const Header = ({ handleDrawerToggle }: HeaderProps) => {
               aria-label="open drawer"
               edge="start"
               onClick={handleDrawerToggle}
-              sx={{ mr: 2, display: { sm: 'none' }, color: '#F0B90B' }}
+              sx={{ mr: 2, display: 'inline-flex', '@media (min-width:1024px)': { display: 'none' }, color: '#F0B90B' }}
             >
               <MenuIcon />
             </IconButton>
@@ -56,7 +54,7 @@ const Header = ({ handleDrawerToggle }: HeaderProps) => {
             variant="h6"
             noWrap
             component="div"
-            sx={{ display: { xs: 'block', sm: 'none' }, color: '#EAECEF', fontWeight: 800 }}
+            sx={{ display: 'block', '@media (min-width:1024px)': { display: 'none' }, color: '#EAECEF', fontWeight: 800 }}
           >
             SHIVAM
           </Typography>
@@ -71,25 +69,12 @@ const Header = ({ handleDrawerToggle }: HeaderProps) => {
               />
               <Typography variant="body2" sx={{ color: '#EAECEF', fontWeight: 700 }}>
                 {user.name}
+                {user.userCode && (
+                  <Box component="span" sx={{ color: '#848E9C', fontWeight: 500 }}> · {user.userCode}</Box>
+                )}
               </Typography>
             </Box>
           )}
-          
-          {/* Theme Toggle */}
-          <Tooltip title={`Switch to ${themeMode === 'light' ? 'dark' : 'light'} mode`}>
-            <IconButton 
-              onClick={toggleThemeMode} 
-              sx={{ 
-                mr: 1.5, 
-                color: '#848E9C',
-                transition: 'all 0.2s ease-in-out',
-                '&:hover': { color: '#EAECEF', backgroundColor: '#2B3139' }
-              }}
-              aria-label="toggle theme"
-            >
-              {themeMode === 'light' ? <Brightness4Icon /> : <Brightness7Icon />}
-            </IconButton>
-          </Tooltip>
           
           {/* Data Management Menu */}
           <IconButton 
@@ -105,6 +90,21 @@ const Header = ({ handleDrawerToggle }: HeaderProps) => {
           >
             <SettingsIcon />
           </IconButton>
+
+          {/* Icon-only logout on phone screens — the text button below is desktop-only */}
+          <Tooltip title="Logout">
+            <IconButton
+              onClick={logout}
+              aria-label="logout"
+              sx={{
+                display: { xs: 'inline-flex', sm: 'none' },
+                color: '#848E9C',
+                '&:hover': { color: '#F6465D', backgroundColor: '#2B3139' },
+              }}
+            >
+              <LogoutIcon />
+            </IconButton>
+          </Tooltip>
 
           <Tooltip title="Logout">
             <Button

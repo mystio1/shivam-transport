@@ -21,7 +21,21 @@ import {
   DialogContent,
   DialogActions,
   Alert,
+  useMediaQuery,
+  useTheme,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Tooltip,
+  List,
+  ListItem,
+  ListItemText,
 } from '@mui/material';
+import type { SelectChangeEvent } from '@mui/material';
 import {
   ArrowBack,
   Phone,
@@ -35,18 +49,42 @@ import {
   Share as ShareIcon,
   Email,
   WhatsApp,
+  FilterAlt,
+  Clear,
+  Add,
+  Edit,
+  Delete,
+  Bookmark,
+  ExpandMore,
+  Savings,
 } from '@mui/icons-material';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
+import type { Trip } from '../types';
 import { useAppContext } from '../context/AppContext';
-import TripForm from '../components/TripForm';
 import TripList from '../components/TripList';
-import { openWhatsApp } from '../utils/whatsapp';
+import { findSimilarName } from '../utils/similarity';
+
+// `Date.toISOString()` converts to UTC first, so late-evening local time (e.g. IST, UTC+5:30)
+// rolls over to "tomorrow" in UTC before slicing — a date <input> defaulting off of that shows
+// the wrong day for several hours around local midnight. This reads the LOCAL calendar date instead.
+const todayLocalDateString = () => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 const CustomerDetails = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const theme = useTheme();
+  const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
   const {
     customers, getCustomerTrips, updateTripPaymentStatus, isLoading,
     branding, updateCustomer, getNextInvoiceNumber, sendBillEmail,
+    addCustomerAdvance, deleteCustomerAdvance, permanentlyDeleteCustomerAdvance, mergeCustomer, saveBill,
   } = useAppContext();
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const triedRedirect = useRef(false);
@@ -56,18 +94,66 @@ const CustomerDetails = () => {
   // State for GST numbers (optional)
   const [customerGst, setCustomerGst] = useState('');
   const [billNo, setBillNo] = useState('');
-  const [billDate, setBillDate] = useState(new Date().toISOString().slice(0, 10));
+  const [billDate, setBillDate] = useState(todayLocalDateString());
   const [bankName, setBankName] = useState('');
   const [branch, setBranch] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [ifscCode, setIfscCode] = useState('');
+  const [selectedBankAccountId, setSelectedBankAccountId] = useState('');
   const [amountInWords, setAmountInWords] = useState('');
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [tripFilterFrom, setTripFilterFrom] = useState('');
+  const [tripFilterTo, setTripFilterTo] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
   const [dialogMessage, setDialogMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Edit customer (name/phone/address) + similar-name collision handling
+  const [isEditCustomerOpen, setIsEditCustomerOpen] = useState(false);
+  const [editCustomerForm, setEditCustomerForm] = useState({ name: '', phone: '', address: '' });
+  const [savingCustomerEdit, setSavingCustomerEdit] = useState(false);
+  const [collisionMatch, setCollisionMatch] = useState<{ id: string; name: string } | null>(null);
+  const [pendingCustomerEdit, setPendingCustomerEdit] = useState<{ name: string; phone: string; address: string } | null>(null);
+  const [mergingCustomer, setMergingCustomer] = useState(false);
+
+  // Advance balance (money the customer already paid ahead of any specific trip)
+  const [isAdvanceDialogOpen, setIsAdvanceDialogOpen] = useState(false);
+  const [advanceAmountInput, setAdvanceAmountInput] = useState('');
+  const [advanceNote, setAdvanceNote] = useState('');
+  const [advanceDateInput, setAdvanceDateInput] = useState(todayLocalDateString());
+  const [savingAdvance, setSavingAdvance] = useState(false);
+  const [isAdvanceHistoryOpen, setIsAdvanceHistoryOpen] = useState(false);
+  const [deleteAdvanceEntry, setDeleteAdvanceEntry] = useState<{ id: string; amount: number; note: string } | null>(null);
+  const [deletingAdvance, setDeletingAdvance] = useState(false);
+  const [permanentDeleteEntry, setPermanentDeleteEntry] = useState<{ id: string; amount: number; note: string } | null>(null);
+  const [permanentlyDeletingAdvance, setPermanentlyDeletingAdvance] = useState(false);
+
+  // Advance Balance dialog — search + amount-range + date (specific or range) filters
+  const [advanceSearchTerm, setAdvanceSearchTerm] = useState('');
+  const [advanceAmountMin, setAdvanceAmountMin] = useState('');
+  const [advanceAmountMax, setAdvanceAmountMax] = useState('');
+  const [advanceDateFrom, setAdvanceDateFrom] = useState('');
+  const [advanceDateTo, setAdvanceDateTo] = useState('');
+
+  // "Download Bill" (single trip) — if the customer has an advance balance, ask first whether
+  // it should be applied to that trip's bill before generating it.
+  const [tripBillAdvancePrompt, setTripBillAdvancePrompt] = useState<Trip | null>(null);
+
+  // Discount (optional, applied to the bill's sub total before GST)
+  const [discountAmount, setDiscountAmount] = useState('');
+
+  // GST vs Non-GST bill choice — asked whenever "View & Print Bill" is clicked
+  const [isBillTypeDialogOpen, setIsBillTypeDialogOpen] = useState(false);
+  const [billTypeChoice, setBillTypeChoice] = useState<'non-gst' | 'gst'>('non-gst');
+  const [isGstBill, setIsGstBill] = useState(false);
+  const [gstPercent, setGstPercent] = useState('');
+  const [gstBillNoInput, setGstBillNoInput] = useState('');
+  const [billTypeError, setBillTypeError] = useState('');
+
   // Ref for the bill section
   const billRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const [sharingBill, setSharingBill] = useState(false);
+  const [savingBillRecord, setSavingBillRecord] = useState(false);
 
   // Find customer by ID
   console.log('CustomerDetails: id param =', id, 'customers =', customers);
@@ -116,14 +202,28 @@ const CustomerDetails = () => {
     if (customer?.gstNumber) setCustomerGst(customer.gstNumber);
   }, [customer?.gstNumber]);
 
+  // Default to the first saved bank account (admin picks a different one from the dropdown
+  // below if this bill should go on a different account).
   useEffect(() => {
-    if (!branding) return;
-    setBankName(prev => prev || branding.bankName);
-    setBranch(prev => prev || branding.bankBranch);
-    setAccountNumber(prev => prev || branding.bankAccountNumber);
-    setIfscCode(prev => prev || branding.bankIfsc);
+    if (selectedBankAccountId) return;
+    const first = branding?.bankAccounts?.[0];
+    if (!first) return;
+    setSelectedBankAccountId(first.id);
+    setBankName(first.bankName);
+    setBranch(first.bankBranch);
+    setAccountNumber(first.accountNumber);
+    setIfscCode(first.ifscCode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branding]);
+
+  const handleSelectBankAccount = (accountId: string) => {
+    setSelectedBankAccountId(accountId);
+    const account = branding?.bankAccounts?.find(a => a.id === accountId);
+    setBankName(account?.bankName || '');
+    setBranch(account?.bankBranch || '');
+    setAccountNumber(account?.accountNumber || '');
+    setIfscCode(account?.ifscCode || '');
+  };
 
   // Handle back navigation
   const handleBack = () => {
@@ -168,8 +268,19 @@ const CustomerDetails = () => {
     );
   }
 
-  // Get customer trips
-  const customerTrips = getCustomerTrips(id || '');
+  // Get customer trips, narrowed to the From/To date filter when one is set. Shadowing
+  // `customerTrips` here (rather than introducing a separate name) means every existing usage
+  // below — stats, bill preview, print/WhatsApp/email, trip history — picks up the filter for free.
+  const allCustomerTrips = getCustomerTrips(id || '');
+  const isDateFiltered = Boolean(tripFilterFrom || tripFilterTo);
+  const customerTrips = isDateFiltered
+    ? allCustomerTrips.filter(trip => {
+        const tripTime = new Date(trip.date).getTime();
+        if (tripFilterFrom && tripTime < new Date(tripFilterFrom).getTime()) return false;
+        if (tripFilterTo && tripTime > new Date(tripFilterTo).getTime() + 86399999) return false;
+        return true;
+      })
+    : allCustomerTrips;
 
   // Calculate statistics
   const totalTrips = customerTrips.length;
@@ -188,12 +299,6 @@ const CustomerDetails = () => {
     
   const pendingAmount = totalAmount - paidAmount;
 
-  // Handle trip added with improved debugging
-  const handleTripAdded = () => {
-    console.log('Trip added, refreshing customer details');
-    setRefreshTrigger(prev => prev + 1);
-  };
-
   // Handle back navigation
   const handleBackToHome = () => {
     navigate('/');
@@ -203,6 +308,105 @@ const CustomerDetails = () => {
   const handlePaymentStatusUpdate = (tripId: string, isPaid: boolean) => {
     updateTripPaymentStatus(tripId, isPaid);
     setRefreshTrigger(prev => prev + 1);
+  };
+
+  // ── Edit customer name/phone/address ────────────────────────────────────
+  const openEditCustomer = () => {
+    if (!customer) return;
+    setEditCustomerForm({ name: customer.name, phone: customer.phone, address: customer.address });
+    setIsEditCustomerOpen(true);
+  };
+
+  const saveCustomerFields = async (data: { name: string; phone: string; address: string }) => {
+    if (!customer) return;
+    setSavingCustomerEdit(true);
+    try {
+      await updateCustomer(customer.id, data);
+      setIsEditCustomerOpen(false);
+    } finally {
+      setSavingCustomerEdit(false);
+    }
+  };
+
+  const handleSaveCustomerEdit = async () => {
+    if (!customer) return;
+    const name = editCustomerForm.name.trim();
+    if (!name) return;
+    const data = { name, phone: editCustomerForm.phone.trim(), address: editCustomerForm.address.trim() };
+    // Only worth checking for a near-duplicate when the name actually changed to something new.
+    if (name.toLowerCase() !== customer.name.toLowerCase()) {
+      const match = findSimilarName(name, customers, customer.id);
+      if (match) {
+        setCollisionMatch(match);
+        setPendingCustomerEdit(data);
+        return;
+      }
+    }
+    await saveCustomerFields(data);
+  };
+
+  const handleMergeIntoExisting = async () => {
+    if (!customer || !collisionMatch) return;
+    setMergingCustomer(true);
+    try {
+      await mergeCustomer(customer.id, collisionMatch.id);
+      setCollisionMatch(null);
+      setPendingCustomerEdit(null);
+      setIsEditCustomerOpen(false);
+      navigate(`/customer/${collisionMatch.id}`);
+    } finally {
+      setMergingCustomer(false);
+    }
+  };
+
+  const handleKeepAsSeparateCustomer = async () => {
+    if (!pendingCustomerEdit) return;
+    await saveCustomerFields(pendingCustomerEdit);
+    setCollisionMatch(null);
+    setPendingCustomerEdit(null);
+  };
+
+  // ── Advance balance (money paid ahead of any specific trip) ─────────────
+  const openAddAdvanceDialog = () => {
+    setAdvanceDateInput(todayLocalDateString());
+    setIsAdvanceDialogOpen(true);
+  };
+
+  const handleAddAdvance = async () => {
+    if (!customer) return;
+    const amount = Number(advanceAmountInput);
+    if (!amount || amount <= 0) return;
+    setSavingAdvance(true);
+    try {
+      await addCustomerAdvance(customer.id, amount, advanceNote.trim(), advanceDateInput);
+      setIsAdvanceDialogOpen(false);
+      setAdvanceAmountInput('');
+      setAdvanceNote('');
+    } finally {
+      setSavingAdvance(false);
+    }
+  };
+
+  const handleConfirmDeleteAdvance = async () => {
+    if (!customer || !deleteAdvanceEntry) return;
+    setDeletingAdvance(true);
+    try {
+      await deleteCustomerAdvance(customer.id, deleteAdvanceEntry.id);
+      setDeleteAdvanceEntry(null);
+    } finally {
+      setDeletingAdvance(false);
+    }
+  };
+
+  const handleConfirmPermanentDelete = async () => {
+    if (!customer || !permanentDeleteEntry) return;
+    setPermanentlyDeletingAdvance(true);
+    try {
+      await permanentlyDeleteCustomerAdvance(customer.id, permanentDeleteEntry.id);
+      setPermanentDeleteEntry(null);
+    } finally {
+      setPermanentlyDeletingAdvance(false);
+    }
   };
 
   const convertNumberToWords = (num: number): string => {
@@ -240,6 +444,31 @@ const CustomerDetails = () => {
     return sections.length ? sections.join(' ') : 'Zero';
   };
 
+  // Computes every figure the bill needs — sub total, optional discount, optional GST (applied
+  // to the discounted sub total), amount already received per-trip, and the customer's available
+  // advance balance auto-applied against whatever is still outstanding after GST. Nothing here is
+  // persisted: it's a live, view-time calculation so opening the bill repeatedly never double-spends
+  // the advance wallet — it only actually leaves the wallet when settled via Record Payment.
+  const getBillTotals = (trips: typeof customerTrips, overrides?: { discount?: number; gstEnabled?: boolean; gstPercent?: number; applyAdvance?: boolean }) => {
+    const subTotal = trips.reduce((sum, t) => {
+      const amt = typeof t.amount === 'number' ? t.amount : parseFloat(String(t.amount)) || 0;
+      return sum + amt;
+    }, 0);
+    const received = trips.reduce((sum, t) => sum + (t.paidAmount || 0), 0);
+    const discount = Math.max(0, overrides?.discount ?? (Number(discountAmount) || 0));
+    const gstEnabled = overrides?.gstEnabled ?? isGstBill;
+    const gstPct = gstEnabled ? (overrides?.gstPercent ?? (Number(gstPercent) || 0)) : 0;
+    const taxable = Math.max(0, subTotal - discount);
+    const gstAmount = gstEnabled ? (taxable * gstPct) / 100 : 0;
+    const grandTotal = taxable + gstAmount;
+    const outstanding = Math.max(0, grandTotal - received);
+    const advanceAvailable = (overrides?.applyAdvance ?? true) ? Math.max(0, customer?.advanceBalance || 0) : 0;
+    const advanceApplied = Math.min(advanceAvailable, outstanding);
+    const netPayable = outstanding - advanceApplied;
+    const showBreakdown = discount > 0 || gstEnabled || received > 0 || advanceApplied > 0;
+    return { subTotal, received, discount, gstEnabled, gstPct, gstAmount, grandTotal, outstanding, advanceApplied, advanceAvailable, netPayable, showBreakdown };
+  };
+
   // Opens the bill preview. Assigns a real, server-issued invoice number the first time
   // (instead of always defaulting to "01"), and saves any GST number entered here onto the
   // customer record so it's remembered next time.
@@ -260,21 +489,71 @@ const CustomerDetails = () => {
     setIsPreviewOpen(true);
   };
 
+  // "View & Print Bill" now opens this chooser first — Non-GST keeps today's behaviour exactly
+  // (auto invoice number, plain total), GST asks for the percentage plus a manually-entered bill
+  // number (kept separate from the app's own auto-incrementing counter, since GST invoices
+  // typically run on their own numbering series).
+  const openBillTypeDialog = () => {
+    setBillTypeChoice(isGstBill ? 'gst' : 'non-gst');
+    setGstBillNoInput(isGstBill ? billNo : '');
+    setBillTypeError('');
+    setIsBillTypeDialogOpen(true);
+  };
+
+  const handleBillTypeContinue = async () => {
+    if (billTypeChoice === 'non-gst') {
+      setIsGstBill(false);
+      setGstPercent('');
+      setIsBillTypeDialogOpen(false);
+      await handleOpenPreview();
+      return;
+    }
+    const pct = Number(gstPercent);
+    if (!gstPercent || pct <= 0) {
+      setBillTypeError('Enter a valid GST percentage.');
+      return;
+    }
+    if (!gstBillNoInput.trim()) {
+      setBillTypeError('Enter the bill number for this GST invoice.');
+      return;
+    }
+    setIsGstBill(true);
+    setBillNo(gstBillNoInput.trim());
+    setIsBillTypeDialogOpen(false);
+    setBillTypeError('');
+    if (customer && customerGst.trim() && customerGst.trim() !== (customer.gstNumber || '')) {
+      updateCustomer(customer.id, { gstNumber: customerGst.trim() }).catch(err =>
+        console.error('Could not save customer GST number:', err)
+      );
+    }
+    setIsPreviewOpen(true);
+  };
+
   const buildBillText = () => {
     const company = branding?.companyName || 'Shivam Transport';
-    const totalAdvance = customerTrips.reduce((s, t) => s + (t.advanceAmount || 0), 0);
-    const netPayable = totalAmount - totalAdvance;
+    const totals = getBillTotals(customerTrips);
     const lineBreak = '─'.repeat(40);
     const tripLines = customerTrips.map((trip, i) =>
-      `${i + 1}. ${new Date(trip.date).toLocaleDateString('en-IN')} | ${trip.pickupLocation} → ${trip.dropLocation}\n   Amount: Rs.${trip.amount.toFixed(2)}  Advance: Rs.${(trip.advanceAmount || 0).toFixed(2)}`
+      `${i + 1}. ${new Date(trip.date).toLocaleDateString('en-IN')} | ${trip.pickupLocation} → ${trip.dropLocation}\n   Amount: Rs.${trip.amount.toFixed(2)}  Paid: Rs.${(trip.paidAmount || 0).toFixed(2)}`
     ).join('\n');
     const phones = [branding?.phone1, branding?.phone2].filter(Boolean).join(' / ');
+
+    const breakdownLines = [
+      `Sub Total:      Rs. ${totals.subTotal.toFixed(2)}`,
+      totals.discount > 0 ? `Discount:      -Rs. ${totals.discount.toFixed(2)}` : '',
+      totals.gstEnabled ? `GST (${totals.gstPct}%):     +Rs. ${totals.gstAmount.toFixed(2)}` : '',
+      (totals.discount > 0 || totals.gstEnabled) ? `Grand Total:    Rs. ${totals.grandTotal.toFixed(2)}` : '',
+      totals.received > 0 ? `Less: Received: -Rs. ${totals.received.toFixed(2)}` : '',
+      totals.advanceApplied > 0 ? `Less: Advance:  -Rs. ${totals.advanceApplied.toFixed(2)}` : '',
+      totals.showBreakdown ? `NET PAYABLE:    Rs. ${totals.netPayable.toFixed(2)}` : `TOTAL:          Rs. ${totals.subTotal.toFixed(2)}`,
+      totals.advanceApplied > 0 ? `(Advance balance remaining: Rs. ${(totals.advanceAvailable - totals.advanceApplied).toFixed(2)})` : '',
+    ].filter(Boolean).join('\n');
 
     return `${company.toUpperCase()}
 ${branding?.tagline || ''}
 ${branding?.proprietorName ? `Prop.: ${branding.proprietorName}` : ''}${phones ? `\nMob.: ${phones}` : ''}
 ${lineBreak}
-INVOICE
+${isGstBill ? 'TAX INVOICE' : 'INVOICE'}
 ${lineBreak}
 Bill To: ${customer?.name}
 Phone:   ${customer?.phone || 'N/A'}
@@ -284,9 +563,7 @@ ${lineBreak}
 TRIP DETAILS:
 ${tripLines}
 ${lineBreak}
-Sub Total:      Rs. ${totalAmount.toFixed(2)}
-${totalAdvance > 0 ? `Advance Paid:  -Rs. ${totalAdvance.toFixed(2)}
-NET PAYABLE:    Rs. ${netPayable.toFixed(2)}` : `TOTAL:          Rs. ${totalAmount.toFixed(2)}`}
+${breakdownLines}
 ${lineBreak}
 ${bankName ? `Bank: ${bankName}${branch ? ` | Branch: ${branch}` : ''}\n` : ''}${accountNumber ? `A/c: ${accountNumber}\n` : ''}${ifscCode ? `IFSC: ${ifscCode}\n` : ''}${lineBreak}
 ${branding?.footerNote || 'Thank you for your business!'}`;
@@ -310,18 +587,80 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
     }
   };
 
-  const handleWhatsAppBill = () => {
-    if (!customer?.phone) return;
-    openWhatsApp(customer.phone, buildBillText());
+  // Rasterizes the on-screen invoice preview and drops it into an A4 PDF — same visual layout
+  // that's already rendered for the print path, just captured as an image instead of printed.
+  const generateBillPdfBlob = async (): Promise<Blob> => {
+    const node = previewRef.current;
+    if (!node) throw new Error('Bill preview is not ready yet');
+    const canvas = await html2canvas(node, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const imgHeight = (canvas.height * pageWidth) / canvas.width;
+
+    let heightLeft = imgHeight;
+    let position = 0;
+    pdf.addImage(imgData, 'JPEG', 0, position, pageWidth, imgHeight);
+    heightLeft -= pageHeight;
+    while (heightLeft > 0) {
+      position = heightLeft - imgHeight;
+      pdf.addPage();
+      pdf.addImage(imgData, 'JPEG', 0, position, pageWidth, imgHeight);
+      heightLeft -= pageHeight;
+    }
+    return pdf.output('blob');
   };
 
-  const handlePrintBill = () => {
-    const formattedBillDate = billDate
-      ? new Date(billDate).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })
-      : new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const amountWords = amountInWords.trim() || `${convertNumberToWords(Math.round(totalAmount))} Rupees Only`;
-    const totalAdvance = customerTrips.reduce((s, t) => s + (t.advanceAmount || 0), 0);
-    const netPayable = totalAmount - totalAdvance;
+  // WhatsApp button: shares the actual bill PDF (not a text summary) and, wherever the platform
+  // allows it, opens WhatsApp's own contact picker instead of pre-targeting a specific number —
+  // the admin picks who to send it to from inside WhatsApp, same as sharing any file normally.
+  const handleWhatsAppBill = async () => {
+    setSharingBill(true);
+    setDialogMessage(null);
+    try {
+      const blob = await generateBillPdfBlob();
+      const fileName = `Invoice-${customer?.name || 'Bill'}.pdf`;
+      const file = new File([blob], fileName, { type: 'application/pdf' });
+
+      const nav = navigator as Navigator & { canShare?: (data?: ShareData) => boolean };
+      if (nav.canShare && nav.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: fileName });
+        return;
+      }
+
+      // Desktop / browsers that can't share a file directly: download the PDF, then open
+      // WhatsApp's contact-picker (no phone number baked in) so the admin can pick a contact
+      // and manually attach the file WhatsApp itself has no web API for pre-attaching one.
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(downloadUrl), 30000);
+
+      window.open('https://wa.me/?text=' + encodeURIComponent(`Invoice for ${customer?.name || 'you'} — attaching the PDF I just downloaded.`), '_blank');
+      setDialogMessage({ type: 'success', text: 'PDF downloaded and WhatsApp opened — pick a contact there and attach the downloaded file.' });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return; // user cancelled the share sheet
+      setDialogMessage({ type: 'error', text: error instanceof Error ? error.message : 'Could not share the bill' });
+    } finally {
+      setSharingBill(false);
+    }
+  };
+
+  // Builds the printable invoice HTML for an arbitrary set of trips + totals — shared by the
+  // main "Print / Save PDF" flow (the customer's filtered trip list) and the Trip History
+  // per-trip "Download Bill" action (a single trip).
+  const buildBillHtml = (
+    tripsForBill: typeof customerTrips,
+    opts: { billNoLabel: string; billDateLabel: string; totals: ReturnType<typeof getBillTotals>; amountWordsOverride?: string; docTitle?: string }
+  ) => {
+    const { totals } = opts;
+    const amountWords = opts.amountWordsOverride?.trim() ||
+      `${convertNumberToWords(Math.round(totals.showBreakdown ? totals.netPayable : totals.subTotal))} Rupees Only`;
     const escapeHtml = (value: string | number) =>
       String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
     const printValue = (value: string | number | undefined) => escapeHtml(value || '');
@@ -342,18 +681,52 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
     const addressLine = branding?.address || '';
     const footerNote = branding?.footerNote || 'Thank you for your business!';
     const logoUrl = branding?.logoDataUrl || '';
+    const signatureUrl = branding?.signatureDataUrl || '';
 
-    const rowsHtml = customerTrips.map((trip, index) => {
+    const rowsHtml = tripsForBill.map((trip, index) => {
       const bg = index % 2 === 0 ? '#fff' : '#fdf6f0';
       return `
         <tr style="background:${bg};">
           <td style="padding:5px 7px;border:1px solid #c8b8a2;font-size:9.5pt;text-align:center;">${printValue(new Date(trip.date).toLocaleDateString('en-IN'))}</td>
           <td style="padding:5px 7px;border:1px solid #c8b8a2;font-size:9.5pt;">${printValue(trip.pickupLocation)}</td>
           <td style="padding:5px 7px;border:1px solid #c8b8a2;font-size:9.5pt;">${printValue(trip.dropLocation)}</td>
-          <td style="padding:5px 7px;border:1px solid #c8b8a2;font-size:9.5pt;text-align:right;">${printValue((trip.advanceAmount || 0).toFixed(2))}</td>
+          <td style="padding:5px 7px;border:1px solid #c8b8a2;font-size:9.5pt;text-align:right;">${printValue((trip.paidAmount || 0).toFixed(2))}</td>
           <td style="padding:5px 7px;border:1px solid #c8b8a2;font-size:9.5pt;text-align:right;">${printValue(trip.amount.toFixed(2))}</td>
         </tr>`;
     }).join('');
+
+    const breakdownRowsHtml = `
+      ${totals.discount > 0 ? `
+      <tr class="discount-row">
+        <td colspan="4" class="r">Discount</td>
+        <td class="r">- ₹${printValue(totals.discount.toFixed(2))}</td>
+      </tr>` : ''}
+      ${totals.gstEnabled ? `
+      <tr class="gst-row">
+        <td colspan="4" class="r">GST (${printValue(totals.gstPct)}%)</td>
+        <td class="r">+ ₹${printValue(totals.gstAmount.toFixed(2))}</td>
+      </tr>` : ''}
+      ${(totals.discount > 0 || totals.gstEnabled) ? `
+      <tr class="grand-total-row">
+        <td colspan="4" class="r">Grand Total</td>
+        <td class="r">₹${printValue(totals.grandTotal.toFixed(2))}</td>
+      </tr>` : ''}
+      ${totals.received > 0 ? `
+      <tr class="advance-row">
+        <td colspan="4" class="r">Less: Amount Received</td>
+        <td class="r">- ₹${printValue(totals.received.toFixed(2))}</td>
+      </tr>` : ''}
+      ${totals.advanceApplied > 0 ? `
+      <tr class="advance-row">
+        <td colspan="4" class="r">Less: Advance Balance Applied</td>
+        <td class="r">- ₹${printValue(totals.advanceApplied.toFixed(2))}</td>
+      </tr>` : ''}
+      ${totals.showBreakdown ? `
+      <tr class="net-row">
+        <td colspan="4" class="r">NET PAYABLE</td>
+        <td class="r">₹${printValue(totals.netPayable.toFixed(2))}</td>
+      </tr>` : ''}
+    `;
 
     const css = `
       @page { size: A4 portrait; margin: 14mm 12mm; }
@@ -389,6 +762,9 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
       .tt td { padding:6px 8px; border:1px solid #E2E8F0; color:#1a1a1a; }
       .tt tbody tr:nth-child(even) { background:#F8FAFC; }
       .subtotal-row td { font-weight:700; color:${primaryColor}; }
+      .discount-row td { background:#FDEDED; color:#A61B1B; font-weight:700; }
+      .gst-row td { background:#EAF2FE; color:#0B4EA6; font-weight:700; }
+      .grand-total-row td { background:#F1F1F1; color:#1a1a1a; font-weight:800; }
       .advance-row td { background:#FFF9E6; color:#7A5A00; font-weight:700; }
       .net-row td { background:#EBF5EC; color:#0B5E1F; font-weight:900; font-size:10pt; }
       /* amount in words */
@@ -401,8 +777,9 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
       .bank-col table { width:100%; font-size:8.5pt; }
       .bank-col td.label { color:#666; font-weight:600; width:95px; }
       .bank-col td.strong { font-weight:700; color:#111; }
-      .sign-col { flex:0 0 160px; text-align:right; display:flex; flex-direction:column; justify-content:space-between; }
-      .for-company { font-weight:600; color:#333; font-style:italic; margin-bottom:28px; }
+      .sign-col { flex:0 0 160px; text-align:right; display:flex; flex-direction:column; justify-content:space-between; align-items:flex-end; }
+      .for-company { font-weight:600; color:#333; font-style:italic; margin-bottom:8px; }
+      .sign-img { max-width:140px; max-height:50px; object-fit:contain; margin-bottom:4px; }
       .sign-line { font-weight:700; border-top:1px solid #666; padding-top:4px; width:140px; margin-left:auto; text-align:center; font-size:8.5pt; }
       /* footer note */
       .footer-note { text-align:center; margin-top:18px; font-size:8.5pt; color:#888; font-style:italic; }
@@ -413,11 +790,13 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
       }
     `;
 
+    const docTitle = opts.docTitle || (isGstBill ? 'Tax Invoice' : 'Invoice');
+
     const html = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8"/>
-  <title>Invoice - ${printValue(customer.name)}</title>
+  <title>${printValue(docTitle)} - ${printValue(customer.name)}</title>
   <style>${css}</style>
 </head>
 <body>
@@ -441,9 +820,9 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
     </div>
     <div class="info-col">
       <table>
-        <tr><td class="label">Bill No.:</td><td class="strong">${printValue(billNo || '01')}</td></tr>
-        <tr><td class="label">Date:</td><td>${printValue(formattedBillDate)}</td></tr>
-        <tr><td class="label">Total Trips:</td><td>${customerTrips.length}</td></tr>
+        <tr><td class="label">Bill No.:</td><td class="strong">${printValue(opts.billNoLabel || '01')}</td></tr>
+        <tr><td class="label">Date:</td><td>${printValue(opts.billDateLabel)}</td></tr>
+        <tr><td class="label">Total Trips:</td><td>${tripsForBill.length}</td></tr>
       </table>
     </div>
   </div>
@@ -454,7 +833,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
         <th style="width:15%;">Date</th>
         <th class="l" style="width:25%;">Pickup</th>
         <th class="l" style="width:25%;">Drop</th>
-        <th class="r" style="width:17.5%;">Advance</th>
+        <th class="r" style="width:17.5%;">Paid</th>
         <th class="r" style="width:17.5%;">Amount</th>
       </tr>
     </thead>
@@ -462,22 +841,15 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
     <tfoot>
       <tr class="subtotal-row">
         <td colspan="3" class="r">Sub Total</td>
-        <td class="r">₹${printValue(totalAdvance.toFixed(2))}</td>
-        <td class="r">₹${printValue(totalAmount.toFixed(2))}</td>
+        <td class="r">₹${printValue(totals.received.toFixed(2))}</td>
+        <td class="r">₹${printValue(totals.subTotal.toFixed(2))}</td>
       </tr>
-      ${totalAdvance > 0 ? `
-      <tr class="advance-row">
-        <td colspan="4" class="r">Less: Advance Paid</td>
-        <td class="r">- ₹${printValue(totalAdvance.toFixed(2))}</td>
-      </tr>
-      <tr class="net-row">
-        <td colspan="4" class="r">NET PAYABLE</td>
-        <td class="r">₹${printValue(netPayable.toFixed(2))}</td>
-      </tr>` : ''}
+      ${breakdownRowsHtml}
     </tfoot>
   </table>
 
   <div class="words-box"><b>Amount in Words:</b> ${printValue(amountWords)}</div>
+  ${totals.advanceApplied > 0 ? `<div class="words-box" style="margin-top:-10px;"><b>Advance Balance Remaining:</b> ₹${printValue((totals.advanceAvailable - totals.advanceApplied).toFixed(2))}</div>` : ''}
 
   <div class="footer-row">
     <div class="bank-col">
@@ -491,6 +863,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
     </div>
     <div class="sign-col">
       <div class="for-company">For ${printValue(companyName)}</div>
+      ${signatureUrl ? `<img src="${signatureUrl}" alt="Signature" class="sign-img" />` : '<div style="height:38px;"></div>'}
       <div class="sign-line">Authorized Signatory</div>
     </div>
   </div>
@@ -501,10 +874,16 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
 </body>
 </html>`;
 
+    return html;
+  };
+
+  // Opens the print window (browser) or hands the HTML to the native printer plugin (Capacitor).
+  // Used for both the main filtered bill and the single-trip "Download Bill" action.
+  const openPrintWindow = (html: string, docName: string) => {
     if (Capacitor.isNativePlatform()) {
       const cleanHtml = html.replace('<script>window.addEventListener("load",function(){setTimeout(function(){window.focus();window.print();},450);});</script>', '');
       Printer.printHtml({
-        name: `Invoice_${customer.name}`,
+        name: docName,
         html: cleanHtml
       }).catch(err => {
         console.error("Print error:", err);
@@ -514,6 +893,91 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
       if (!printWindow) return;
       printWindow.document.write(html);
       printWindow.document.close();
+    }
+  };
+
+  const handlePrintBill = () => {
+    const formattedBillDate = billDate
+      ? new Date(billDate).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      : new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const totals = getBillTotals(customerTrips);
+    const html = buildBillHtml(customerTrips, {
+      billNoLabel: billNo || '01',
+      billDateLabel: formattedBillDate,
+      totals,
+      amountWordsOverride: amountInWords,
+    });
+    openPrintWindow(html, `Invoice_${customer.name}`);
+  };
+
+  // Trip History → "Download Bill": a standalone single-trip invoice, independent of whatever
+  // date filter / GST / discount is currently set up for the main bill above.
+  const generateTripBillDownload = (trip: Trip, applyAdvance: boolean) => {
+    const formattedDate = new Date(trip.date).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const totals = getBillTotals([trip], { discount: 0, gstEnabled: false, applyAdvance });
+    const html = buildBillHtml([trip], {
+      billNoLabel: `TRIP-${trip.id.slice(-6).toUpperCase()}`,
+      billDateLabel: formattedDate,
+      totals,
+      docTitle: 'Trip Bill',
+    });
+    openPrintWindow(html, `Trip_${trip.id}`);
+  };
+
+  // Asks first whether the customer's advance balance should be applied, since a single-trip
+  // bill often serves a different purpose than the main aggregated one.
+  const handleDownloadTripBill = (trip: Trip) => {
+    if ((customer?.advanceBalance || 0) > 0) {
+      setTripBillAdvancePrompt(trip);
+    } else {
+      generateTripBillDownload(trip, false);
+    }
+  };
+
+  // "Save to My Bills" — snapshots this preview (trip lines + totals as they are right now)
+  // into a permanent record, independent of the live preview which recomputes on every open.
+  const handleSaveToMyBills = async () => {
+    if (!customer) return;
+    setSavingBillRecord(true);
+    setDialogMessage(null);
+    try {
+      const totals = getBillTotals(customerTrips);
+      const finalNetPayable = totals.showBreakdown ? totals.netPayable : totals.subTotal;
+      await saveBill({
+        customerId: customer.id,
+        billNo: billNo || '01',
+        billDate: billDate ? new Date(billDate).toISOString() : new Date().toISOString(),
+        isGstBill,
+        gstPercent: totals.gstPct,
+        discount: totals.discount,
+        subTotal: totals.subTotal,
+        received: totals.received,
+        gstAmount: totals.gstAmount,
+        grandTotal: totals.grandTotal,
+        advanceApplied: totals.advanceApplied,
+        netPayable: finalNetPayable,
+        amountInWords: amountInWords.trim() || `${convertNumberToWords(Math.round(finalNetPayable))} Rupees Only`,
+        trips: customerTrips.map(t => ({
+          tripId: t.id,
+          date: t.date,
+          pickupLocation: t.pickupLocation,
+          dropLocation: t.dropLocation,
+          amount: t.amount,
+          paidAmount: t.paidAmount || 0,
+        })),
+        customerPhone: customer.phone || '',
+        customerAddress: customer.address || '',
+        customerGst: customerGst.trim(),
+        bankName: bankName.trim(),
+        bankBranch: branch.trim(),
+        accountNumber: accountNumber.trim(),
+        ifscCode: ifscCode.trim(),
+      });
+      setDialogMessage({ type: 'success', text: 'Bill saved to My Bills.' });
+    } catch (error) {
+      setDialogMessage({ type: 'error', text: error instanceof Error ? error.message : 'Could not save the bill' });
+    } finally {
+      setSavingBillRecord(false);
     }
   };
 
@@ -534,6 +998,38 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
     }
   };
 
+  // Single source of truth for the bill totals shown across the collapsed Billing Preview,
+  // the Invoice Preview dialog, and (via buildBillHtml) the printed/PDF version.
+  const billTotals = getBillTotals(customerTrips);
+
+  // Advance history, newest first — deleted entries are kept as a read-only record (soft delete)
+  // and shown separately so they no longer count toward the balance but aren't lost either.
+  const sortedAdvanceHistory = [...(customer.advanceHistory || [])].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+  );
+
+  // Advance Balance dialog filters — search matches note, amount, or date; amount range and
+  // date range (a single specific day works fine as From === To) are both optional.
+  const matchesAdvanceFilters = (entry: (typeof sortedAdvanceHistory)[number]) => {
+    const term = advanceSearchTerm.trim().toLowerCase();
+    if (term) {
+      const dateStr = new Date(entry.date).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: '2-digit' }).toLowerCase();
+      const matchesSearch =
+        (entry.note || '').toLowerCase().includes(term) ||
+        String(entry.amount).includes(term) ||
+        dateStr.includes(term);
+      if (!matchesSearch) return false;
+    }
+    if (advanceAmountMin && entry.amount < Number(advanceAmountMin)) return false;
+    if (advanceAmountMax && entry.amount > Number(advanceAmountMax)) return false;
+    if (advanceDateFrom && new Date(entry.date).getTime() < new Date(advanceDateFrom).getTime()) return false;
+    if (advanceDateTo && new Date(entry.date).getTime() > new Date(advanceDateTo).getTime() + 86399999) return false;
+    return true;
+  };
+  const isAdvanceFiltered = Boolean(advanceSearchTerm || advanceAmountMin || advanceAmountMax || advanceDateFrom || advanceDateTo);
+  const activeAdvanceHistory = sortedAdvanceHistory.filter(e => !e.deleted).filter(matchesAdvanceFilters);
+  const deletedAdvanceHistory = sortedAdvanceHistory.filter(e => e.deleted).filter(matchesAdvanceFilters);
+
   return (
     <Box
       sx={{
@@ -542,26 +1038,55 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
         gap: 3,
       }}
     >
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-        <IconButton
-          onClick={handleBackToHome}
-          sx={{ mr: 2, bgcolor: 'action.hover' }}
-          aria-label="back"
-        >
-          <ArrowBack />
-        </IconButton>
-        <Typography variant="h4" component="h1" color="primary.dark" sx={{ fontWeight: 800 }}>
-          Customer Details
-        </Typography>
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={handleOpenPreview}
-          sx={{ ml: 'auto', fontWeight: 750, color: '#000', '&:hover': { bgcolor: 'primary.dark' } }}
-          startIcon={<Receipt />}
-        >
-          View & Print Bill
-        </Button>
+      <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5, mb: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', minWidth: 0, flex: { xs: '1 1 100%', sm: '0 1 auto' } }}>
+          <IconButton
+            onClick={handleBackToHome}
+            sx={{ mr: 1.5, bgcolor: 'action.hover', flexShrink: 0 }}
+            aria-label="back"
+          >
+            <ArrowBack />
+          </IconButton>
+          <Typography
+            variant="h4"
+            component="h1"
+            color="primary.dark"
+            noWrap
+            sx={{ fontWeight: 800, fontSize: { xs: '1.4rem', sm: '2.125rem' }, minWidth: 0 }}
+          >
+            Customer Details
+          </Typography>
+        </Box>
+        <Box sx={{ display: 'flex', gap: 1.5, ml: { xs: 0, sm: 'auto' }, width: { xs: '100%', sm: 'auto' } }}>
+          <Button
+            variant="outlined"
+            onClick={() => setIsAdvanceHistoryOpen(true)}
+            sx={{ flex: { xs: 1, sm: '0 0 auto' }, fontWeight: 750 }}
+            startIcon={<Savings />}
+          >
+            Advance Balance
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={() => navigate(`/add-trip?customerId=${id}`)}
+            sx={{ flex: { xs: 1, sm: '0 0 auto' }, fontWeight: 750 }}
+            startIcon={<Add />}
+          >
+            Add Trip
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={openBillTypeDialog}
+            sx={{
+              flex: { xs: 1, sm: '0 0 auto' },
+              fontWeight: 750, color: '#000', '&:hover': { bgcolor: 'primary.dark' },
+            }}
+            startIcon={<Receipt />}
+          >
+            View & Print Bill
+          </Button>
+        </Box>
       </Box>
       <Paper
         elevation={0}
@@ -575,16 +1100,24 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
       >
         <Box sx={{ display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <Box sx={{ mr: 4, mb: 2 }}>
-            <Typography
-              variant="h5"
-              gutterBottom
-              sx={{
-                fontWeight: 700,
-                color: '#EAECEF'
-              }}
-            >
-              {customer.name}
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography
+                variant="h5"
+                gutterBottom
+                sx={{
+                  fontWeight: 700,
+                  color: '#EAECEF',
+                  mb: 0,
+                }}
+              >
+                {customer.name}
+              </Typography>
+              <Tooltip title="Edit name / phone / address">
+                <IconButton size="small" onClick={openEditCustomer} sx={{ color: '#848E9C', '&:hover': { color: '#F0B90B' } }}>
+                  <Edit fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
               <Phone sx={{ fontSize: 20, mr: 1, color: '#F0B90B' }} />
               <Typography variant="body1" sx={{ color: '#848E9C' }}>
@@ -601,99 +1134,66 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
             )}
           </Box>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, ml: 'auto' }}>
-            <Chip 
-              icon={<LocalShipping />} 
-              label={`${totalTrips} Trips`} 
+            <Chip
+              icon={<LocalShipping />}
+              label={`${totalTrips} Trips`}
               sx={{ fontWeight: 600, backgroundColor: 'rgba(240, 185, 11, 0.1)', color: '#F0B90B', border: '1px solid rgba(240, 185, 11, 0.2)' }}
             />
-            <Chip 
-              icon={<AccountBalanceWallet />} 
-              label={`₹${totalAmount.toFixed(2)} Total`} 
+            <Chip
+              icon={<AccountBalanceWallet />}
+              label={`₹${totalAmount.toFixed(2)} Total`}
               sx={{ fontWeight: 600, backgroundColor: 'rgba(14, 203, 129, 0.1)', color: '#0ECB81', border: '1px solid rgba(14, 203, 129, 0.2)' }}
             />
             {pendingAmount > 0 && (
-              <Chip 
-                icon={<AccountBalanceWallet />} 
-                label={`₹${pendingAmount.toFixed(2)} Pending`} 
+              <Chip
+                icon={<AccountBalanceWallet />}
+                label={`₹${pendingAmount.toFixed(2)} Pending`}
                 sx={{ fontWeight: 600, backgroundColor: 'rgba(246, 70, 93, 0.1)', color: '#F6465D', border: '1px solid rgba(246, 70, 93, 0.2)' }}
               />
             )}
           </Box>
         </Box>
+
+        {/* Advance balance — money the customer has already paid ahead of any specific trip */}
+        <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid #2B3139', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
+          <Savings sx={{ color: '#F0B90B', fontSize: 20 }} />
+          <Typography variant="body2" sx={{ color: '#848E9C' }}>
+            Advance Balance:
+          </Typography>
+          <Typography variant="subtitle1" sx={{ fontWeight: 800, color: (customer.advanceBalance || 0) > 0 ? '#0ECB81' : '#EAECEF' }}>
+            ₹{(customer.advanceBalance || 0).toFixed(2)}
+          </Typography>
+          <Button
+            size="small"
+            startIcon={<Add />}
+            onClick={openAddAdvanceDialog}
+            sx={{ ml: { xs: 0, sm: 'auto' }, color: '#F0B90B', fontWeight: 700 }}
+          >
+            Add Advance Payment
+          </Button>
+        </Box>
       </Paper>
 
-      {/* Summary Cards */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={4}>
-          <Card sx={{
-            height: '100%',
-            borderRadius: 2,
-            background: '#161A1E',
-            borderTop: '3px solid #2B3139',
-            color: '#EAECEF',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-            transition: 'transform 0.3s, box-shadow 0.3s',
-            '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 8px 24px rgba(255, 255, 255, 0.05)' },
-            p: 2
-          }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ color: '#848E9C', fontWeight: 600, fontSize: '1rem' }}>
-                Total Trips
-              </Typography>
-              <Typography variant="h3" sx={{ color: '#EAECEF', fontWeight: 800 }}>{totalTrips}</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={4}>
-          <Card sx={{
-            height: '100%',
-            borderRadius: 2,
-            background: '#161A1E',
-            borderTop: '3px solid #0ECB81',
-            color: '#EAECEF',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-            transition: 'transform 0.3s, box-shadow 0.3s',
-            '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 8px 24px rgba(14, 203, 129, 0.15)' },
-            p: 2
-          }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ color: '#848E9C', fontWeight: 600, fontSize: '1rem' }}>Total Revenue</Typography>
-              <Typography variant="h3" sx={{ color: '#EAECEF', fontWeight: 800 }}>₹{totalAmount.toFixed(2)}</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={4}>
-          <Card sx={{
-            height: '100%',
-            borderRadius: 2,
-            background: '#161A1E',
-            borderTop: '3px solid #F6465D',
-            color: '#EAECEF',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-            transition: 'transform 0.3s, box-shadow 0.3s',
-            '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 8px 24px rgba(246, 70, 93, 0.15)' },
-            p: 2
-          }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom sx={{ color: '#848E9C', fontWeight: 600, fontSize: '1rem' }}>Pending Amount</Typography>
-              <Typography variant="h3" sx={{ color: '#F6465D', fontWeight: 800 }}>₹{pendingAmount.toFixed(2)}</Typography>
-              <Typography variant="body2" sx={{ color: '#0ECB81', mt: 1, fontWeight: 500 }}>
-                {Math.round((paidAmount / (totalAmount || 1)) * 100)}% collected
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-
-{/* Printable Bill Section */}
-<Box ref={billRef} sx={{ marginBottom: 4 }}>
+{/* Printable Bill Section — collapsed by default so the page isn't a wall of scrolling;
+    expand it when you're actually ready to prep a bill for this customer. */}
+<Accordion
+  disableGutters
+  sx={{ mb: 4, bgcolor: '#161A1E', border: '1px solid #2B3139', borderRadius: 2, '&:before': { display: 'none' } }}
+>
+  <AccordionSummary expandIcon={<ExpandMore sx={{ color: '#848E9C' }} />}>
+    <Typography sx={{ display: 'flex', alignItems: 'center', color: '#EAECEF', fontWeight: 700 }}>
+      <Receipt sx={{ mr: 1, color: '#F0B90B' }} />
+      Billing Details
+    </Typography>
+  </AccordionSummary>
+  <AccordionDetails>
+<Box ref={billRef} sx={{ marginBottom: 0 }}>
   <Paper
     elevation={0}
     sx={{
       p: 3,
       mb: 3,
-      bgcolor: '#161A1E',
+      bgcolor: '#1E2329',
       borderRadius: 2,
       border: '1px solid',
       borderColor: '#2B3139',
@@ -741,49 +1241,44 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
           }}
         />
       </Grid>
-      <Grid item xs={12} md={4}>
-        <TextField
-          fullWidth
-          label="Bank Name"
-          value={bankName}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setBankName(e.target.value)}
-          placeholder="Bank Name"
-          variant="outlined"
-          size="small"
-        />
-      </Grid>
-      <Grid item xs={12} md={4}>
-        <TextField
-          fullWidth
-          label="Branch"
-          value={branch}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setBranch(e.target.value)}
-          placeholder="Bank Branch"
-          variant="outlined"
-          size="small"
-        />
-      </Grid>
-      <Grid item xs={12} md={4}>
-        <TextField
-          fullWidth
-          label="Account Number"
-          value={accountNumber}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setAccountNumber(e.target.value)}
-          placeholder="Account Number"
-          variant="outlined"
-          size="small"
-        />
-      </Grid>
-      <Grid item xs={12} md={6}>
-        <TextField
-          fullWidth
-          label="IFSC Code"
-          value={ifscCode}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setIfscCode(e.target.value)}
-          placeholder="IFSC Code"
-          variant="outlined"
-          size="small"
-        />
+      <Grid item xs={12}>
+        {branding?.bankAccounts && branding.bankAccounts.length > 0 ? (
+          <>
+            <FormControl fullWidth size="small">
+              <InputLabel id="bank-account-label">Bank Account (for this bill)</InputLabel>
+              <Select
+                labelId="bank-account-label"
+                label="Bank Account (for this bill)"
+                value={selectedBankAccountId}
+                onChange={(e: SelectChangeEvent) => handleSelectBankAccount(e.target.value)}
+              >
+                {branding.bankAccounts.map(account => (
+                  <MenuItem key={account.id} value={account.id}>
+                    {account.label || account.bankName || 'Unnamed account'}
+                    {account.accountNumber ? ` — ${account.accountNumber}` : ''}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {(bankName || branch || accountNumber || ifscCode) && (
+              <Typography variant="body2" sx={{ color: '#848E9C', mt: 1 }}>
+                {[bankName, branch, accountNumber, ifscCode].filter(Boolean).join(' · ')}
+              </Typography>
+            )}
+          </>
+        ) : (
+          <Alert severity="info" sx={{ alignItems: 'center' }}>
+            No bank accounts saved yet. Add one under{' '}
+            <Box
+              component="span"
+              onClick={() => navigate('/settings')}
+              sx={{ textDecoration: 'underline', cursor: 'pointer', fontWeight: 700 }}
+            >
+              Bill Branding &amp; Settings
+            </Box>{' '}
+            to have it show up here.
+          </Alert>
+        )}
       </Grid>
       <Grid item xs={12} md={6}>
         <TextField
@@ -796,6 +1291,26 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
           size="small"
         />
       </Grid>
+      <Grid item xs={12} md={6}>
+        <TextField
+          fullWidth
+          label="Discount (optional)"
+          type="number"
+          value={discountAmount}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => setDiscountAmount(e.target.value)}
+          placeholder="0.00"
+          variant="outlined"
+          size="small"
+          InputProps={{ startAdornment: <InputAdornment position="start">₹</InputAdornment> }}
+        />
+      </Grid>
+      {isGstBill && (
+        <Grid item xs={12}>
+          <Alert severity="info">
+            GST bill — {gstPercent || 0}% GST will be applied to the sub total{discountAmount ? ' (after the discount above)' : ''}.
+          </Alert>
+        </Grid>
+      )}
     </Grid>
   </Paper>
 
@@ -824,7 +1339,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
             <th style={{ padding: '10px', borderBottom: '2px solid #2B3139', textAlign: 'left', width: '15%' }}>Date</th>
             <th style={{ padding: '10px', borderBottom: '2px solid #2B3139', textAlign: 'left', width: '22%' }}>From</th>
             <th style={{ padding: '10px', borderBottom: '2px solid #2B3139', textAlign: 'left', width: '23%' }}>To</th>
-            <th style={{ padding: '10px', borderBottom: '2px solid #2B3139', textAlign: 'right', width: '14%' }}>Advance</th>
+            <th style={{ padding: '10px', borderBottom: '2px solid #2B3139', textAlign: 'right', width: '14%' }}>Paid</th>
             <th style={{ padding: '10px', borderBottom: '2px solid #2B3139', textAlign: 'right', width: '14%' }}>Amount</th>
             <th style={{ padding: '10px', borderBottom: '2px solid #2B3139', textAlign: 'center', width: '12%' }}>Status</th>
           </tr>
@@ -835,48 +1350,251 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
               <td style={{ padding: '10px', borderBottom: '1px solid #2B3139' }}>{new Date(trip.date).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: '2-digit' })}</td>
               <td style={{ padding: '10px', borderBottom: '1px solid #2B3139' }}>{trip.pickupLocation}</td>
               <td style={{ padding: '10px', borderBottom: '1px solid #2B3139' }}>{trip.dropLocation}</td>
-              <td style={{ padding: '10px', borderBottom: '1px solid #2B3139', textAlign: 'right' }}>₹{(trip.advanceAmount || 0).toFixed(2)}</td>
+              <td style={{ padding: '10px', borderBottom: '1px solid #2B3139', textAlign: 'right' }}>₹{(trip.paidAmount || 0).toFixed(2)}</td>
               <td style={{ padding: '10px', borderBottom: '1px solid #2B3139', textAlign: 'right' }}>₹{trip.amount.toFixed(2)}</td>
               <td style={{ padding: '10px', borderBottom: '1px solid #2B3139', textAlign: 'center', color: trip.isPaid ? '#0ECB81' : '#F6465D' }}>{trip.isPaid ? 'Paid' : 'Pending'}</td>
             </tr>
           ))}
           <tr>
             <td colSpan={3} style={{ padding: '10px', fontWeight: 700, textAlign: 'right', borderTop: '2px solid #2B3139', color: '#F0B90B' }}>Sub Total</td>
-            <td style={{ padding: '10px', fontWeight: 700, textAlign: 'right', borderTop: '2px solid #2B3139', color: '#F0B90B' }}>₹{customerTrips.reduce((sum, trip) => sum + (trip.advanceAmount || 0), 0).toFixed(2)}</td>
-            <td style={{ padding: '10px', fontWeight: 700, textAlign: 'right', borderTop: '2px solid #2B3139', color: '#F0B90B' }}>₹{totalAmount.toFixed(2)}</td>
+            <td style={{ padding: '10px', fontWeight: 700, textAlign: 'right', borderTop: '2px solid #2B3139', color: '#F0B90B' }}>₹{billTotals.received.toFixed(2)}</td>
+            <td style={{ padding: '10px', fontWeight: 700, textAlign: 'right', borderTop: '2px solid #2B3139', color: '#F0B90B' }}>₹{billTotals.subTotal.toFixed(2)}</td>
             <td style={{ padding: '10px', borderTop: '2px solid #2B3139' }} />
           </tr>
-          {customerTrips.reduce((sum, trip) => sum + (trip.advanceAmount || 0), 0) > 0 && (
-            <>
-              <tr style={{ backgroundColor: '#2A2500' }}>
-                <td colSpan={4} style={{ padding: '10px', fontWeight: 700, textAlign: 'right', color: '#C8A200' }}>Less: Advance Paid</td>
-                <td style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: '#C8A200' }}>- ₹{customerTrips.reduce((sum, trip) => sum + (trip.advanceAmount || 0), 0).toFixed(2)}</td>
-                <td />
-              </tr>
-              <tr style={{ backgroundColor: '#0D2A1A' }}>
-                <td colSpan={4} style={{ padding: '10px', fontWeight: 900, textAlign: 'right', color: '#0ECB81', fontSize: '1rem' }}>NET PAYABLE</td>
-                <td style={{ padding: '10px', fontWeight: 900, textAlign: 'right', color: '#0ECB81', fontSize: '1rem' }}>₹{(totalAmount - customerTrips.reduce((sum, trip) => sum + (trip.advanceAmount || 0), 0)).toFixed(2)}</td>
-                <td />
-              </tr>
-            </>
+          {billTotals.discount > 0 && (
+            <tr style={{ backgroundColor: '#3A1414' }}>
+              <td colSpan={4} style={{ padding: '10px', fontWeight: 700, textAlign: 'right', color: '#F6465D' }}>Discount</td>
+              <td style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: '#F6465D' }}>- ₹{billTotals.discount.toFixed(2)}</td>
+              <td />
+            </tr>
+          )}
+          {billTotals.gstEnabled && (
+            <tr style={{ backgroundColor: '#0F2038' }}>
+              <td colSpan={4} style={{ padding: '10px', fontWeight: 700, textAlign: 'right', color: '#58A6FF' }}>GST ({billTotals.gstPct}%)</td>
+              <td style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: '#58A6FF' }}>+ ₹{billTotals.gstAmount.toFixed(2)}</td>
+              <td />
+            </tr>
+          )}
+          {(billTotals.discount > 0 || billTotals.gstEnabled) && (
+            <tr style={{ backgroundColor: '#20242B' }}>
+              <td colSpan={4} style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: '#EAECEF' }}>Grand Total</td>
+              <td style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: '#EAECEF' }}>₹{billTotals.grandTotal.toFixed(2)}</td>
+              <td />
+            </tr>
+          )}
+          {billTotals.received > 0 && (
+            <tr style={{ backgroundColor: '#2A2500' }}>
+              <td colSpan={4} style={{ padding: '10px', fontWeight: 700, textAlign: 'right', color: '#C8A200' }}>Less: Amount Received</td>
+              <td style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: '#C8A200' }}>- ₹{billTotals.received.toFixed(2)}</td>
+              <td />
+            </tr>
+          )}
+          {billTotals.advanceApplied > 0 && (
+            <tr style={{ backgroundColor: '#2A2500' }}>
+              <td colSpan={4} style={{ padding: '10px', fontWeight: 700, textAlign: 'right', color: '#C8A200' }}>Less: Advance Balance Applied</td>
+              <td style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: '#C8A200' }}>- ₹{billTotals.advanceApplied.toFixed(2)}</td>
+              <td />
+            </tr>
+          )}
+          {billTotals.showBreakdown && (
+            <tr style={{ backgroundColor: '#0D2A1A' }}>
+              <td colSpan={4} style={{ padding: '10px', fontWeight: 900, textAlign: 'right', color: '#0ECB81', fontSize: '1rem' }}>NET PAYABLE</td>
+              <td style={{ padding: '10px', fontWeight: 900, textAlign: 'right', color: '#0ECB81', fontSize: '1rem' }}>₹{billTotals.netPayable.toFixed(2)}</td>
+              <td />
+            </tr>
           )}
         </tbody>
       </table>
     </Box>
-    <Typography variant="body2" sx={{ mt: 2, fontWeight: 600, color: '#EAECEF' }}>Amount in words: <span style={{ color: '#848E9C' }}>{amountInWords.trim() || `${convertNumberToWords(Math.round(totalAmount))} Rupees Only`}</span></Typography>
+    <Typography variant="body2" sx={{ mt: 2, fontWeight: 600, color: '#EAECEF' }}>Amount in words: <span style={{ color: '#848E9C' }}>{amountInWords.trim() || `${convertNumberToWords(Math.round(billTotals.showBreakdown ? billTotals.netPayable : billTotals.subTotal))} Rupees Only`}</span></Typography>
+    {billTotals.advanceApplied > 0 && (
+      <Typography variant="body2" sx={{ mt: 1, color: '#848E9C' }}>
+        Advance balance remaining after this bill: <span style={{ color: '#0ECB81', fontWeight: 700 }}>₹{(billTotals.advanceAvailable - billTotals.advanceApplied).toFixed(2)}</span>
+      </Typography>
+    )}
   </Paper>
 </Box>
+  </AccordionDetails>
+</Accordion>
 
+      {/* Trip date filter — narrows the stats below, the Billing Preview / bill, and Trip History */}
+      <Paper
+        elevation={0}
+        sx={{
+          p: { xs: 2, sm: 3 },
+          borderRadius: 2,
+          background: '#161A1E',
+          border: '1px solid #2B3139',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 2,
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: '#F0B90B', fontWeight: 700, mr: 1 }}>
+          <FilterAlt fontSize="small" />
+          <Typography sx={{ fontWeight: 700, color: '#EAECEF' }}>Filter by trip date</Typography>
+        </Box>
+        <TextField
+          label="From"
+          type="date"
+          size="small"
+          value={tripFilterFrom}
+          onChange={e => setTripFilterFrom(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+          sx={{ minWidth: 160 }}
+        />
+        <TextField
+          label="To"
+          type="date"
+          size="small"
+          value={tripFilterTo}
+          onChange={e => setTripFilterTo(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+          sx={{ minWidth: 160 }}
+        />
+        {isDateFiltered && (
+          <>
+            <Chip
+              label={`${customerTrips.length} of ${allCustomerTrips.length} trips shown`}
+              sx={{ fontWeight: 700, backgroundColor: 'rgba(240, 185, 11, 0.1)', color: '#F0B90B' }}
+            />
+            <Button
+              size="small"
+              startIcon={<Clear />}
+              onClick={() => { setTripFilterFrom(''); setTripFilterTo(''); }}
+              sx={{ color: '#848E9C' }}
+            >
+              Clear
+            </Button>
+          </>
+        )}
+        <Typography variant="body2" sx={{ color: '#848E9C', width: '100%' }}>
+          This also controls which trips are included when you view or print the bill below.
+        </Typography>
+      </Paper>
 
-      {/* Trip Form */}
-      <TripForm customerId={id || ''} onTripAdded={handleTripAdded} />
+      {/* Summary Cards */}
+      <Grid container spacing={{ xs: 1.5, sm: 3 }} sx={{ mb: 4 }}>
+        <Grid item xs={4}>
+          <Card sx={{
+            height: '100%',
+            borderRadius: 2,
+            background: '#161A1E',
+            borderTop: '3px solid #2B3139',
+            color: '#EAECEF',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            transition: 'transform 0.3s, box-shadow 0.3s',
+            '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 8px 24px rgba(255, 255, 255, 0.05)' },
+          }}>
+            <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
+              <Typography gutterBottom sx={{ color: '#848E9C', fontWeight: 600, fontSize: { xs: '0.7rem', sm: '1rem' } }}>
+                Total Trips
+              </Typography>
+              <Typography sx={{ color: '#EAECEF', fontWeight: 800, fontSize: { xs: '1.3rem', sm: '2.2rem' } }}>{totalTrips}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={4}>
+          <Card sx={{
+            height: '100%',
+            borderRadius: 2,
+            background: '#161A1E',
+            borderTop: '3px solid #0ECB81',
+            color: '#EAECEF',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            transition: 'transform 0.3s, box-shadow 0.3s',
+            '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 8px 24px rgba(14, 203, 129, 0.15)' },
+          }}>
+            <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
+              <Typography gutterBottom sx={{ color: '#848E9C', fontWeight: 600, fontSize: { xs: '0.7rem', sm: '1rem' } }}>Total Revenue</Typography>
+              <Typography sx={{ color: '#EAECEF', fontWeight: 800, fontSize: { xs: '0.95rem', sm: '2.2rem' }, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>₹{totalAmount.toFixed(2)}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={4}>
+          <Card sx={{
+            height: '100%',
+            borderRadius: 2,
+            background: '#161A1E',
+            borderTop: '3px solid #F6465D',
+            color: '#EAECEF',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            transition: 'transform 0.3s, box-shadow 0.3s',
+            '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 8px 24px rgba(246, 70, 93, 0.15)' },
+          }}>
+            <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
+              <Typography gutterBottom sx={{ color: '#848E9C', fontWeight: 600, fontSize: { xs: '0.7rem', sm: '1rem' } }}>Pending Amount</Typography>
+              <Typography sx={{ color: '#F6465D', fontWeight: 800, fontSize: { xs: '0.95rem', sm: '2.2rem' }, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>₹{pendingAmount.toFixed(2)}</Typography>
+              <Typography variant="body2" sx={{ color: '#0ECB81', mt: 1, fontWeight: 500, fontSize: { xs: '0.65rem', sm: '0.875rem' }, display: { xs: 'none', sm: 'block' } }}>
+                {Math.round((paidAmount / (totalAmount || 1)) * 100)}% collected
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
 
       {/* Trip List */}
-      <TripList 
-        trips={customerTrips} 
+      <TripList
+        customerAdvanceBalance={customer.advanceBalance || 0}
+        trips={customerTrips}
         customerName={customer.name}
-        onUpdatePaymentStatus={handlePaymentStatusUpdate} 
+        onUpdatePaymentStatus={handlePaymentStatusUpdate}
+        onDownloadTripBill={handleDownloadTripBill}
       />
+
+      {/* Bill Type Dialog — GST vs Non-GST, asked whenever "View & Print Bill" is clicked */}
+      <Dialog open={isBillTypeDialogOpen} onClose={() => setIsBillTypeDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Generate Bill</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 0.5 }}>
+            {billTypeError && <Alert severity="error">{billTypeError}</Alert>}
+            <FormControl fullWidth size="small">
+              <InputLabel id="bill-type-label">Bill Type</InputLabel>
+              <Select
+                labelId="bill-type-label"
+                label="Bill Type"
+                value={billTypeChoice}
+                onChange={(e: SelectChangeEvent) => setBillTypeChoice(e.target.value as 'non-gst' | 'gst')}
+              >
+                <MenuItem value="non-gst">Non-GST Bill</MenuItem>
+                <MenuItem value="gst">GST Bill</MenuItem>
+              </Select>
+            </FormControl>
+            {billTypeChoice === 'gst' && (
+              <>
+                <TextField
+                  label="GST Percentage"
+                  type="number"
+                  value={gstPercent}
+                  onChange={e => setGstPercent(e.target.value)}
+                  fullWidth
+                  autoFocus
+                  InputProps={{ endAdornment: <InputAdornment position="end">%</InputAdornment> }}
+                  placeholder="e.g. 18"
+                />
+                <TextField
+                  label="Bill Number"
+                  value={gstBillNoInput}
+                  onChange={e => setGstBillNoInput(e.target.value)}
+                  fullWidth
+                  placeholder="Enter GST invoice number"
+                />
+                <Typography variant="body2" sx={{ color: '#848E9C' }}>
+                  GST is applied to the sub total (after any discount), and the customer's paid amount
+                  and advance balance are subtracted from the final GST-inclusive total.
+                </Typography>
+              </>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsBillTypeDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleBillTypeContinue} variant="contained" sx={{ color: '#0B0E11', fontWeight: 700 }}>
+            Continue
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Invoice Preview Dialog */}
       <Dialog
@@ -884,7 +1602,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
         onClose={() => setIsPreviewOpen(false)}
         maxWidth="md"
         fullWidth
-        fullScreen={Capacitor.isNativePlatform()}
+        fullScreen={Capacitor.isNativePlatform() || isSmallScreen}
         PaperProps={{
           sx: {
             bgcolor: '#ffffff',
@@ -912,6 +1630,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
           )}
           {/* Printable Sheet Simulation container */}
           <Box
+            ref={previewRef}
             sx={{
               maxWidth: '194mm',
               margin: '0 auto',
@@ -1016,7 +1735,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
                     <th style={{ padding: '6px 8px', border: '1px solid #E2E8F0', textAlign: 'center', width: '15%' }}>Date</th>
                     <th style={{ padding: '6px 8px', border: '1px solid #E2E8F0', textAlign: 'left', width: '25%' }}>Pickup</th>
                     <th style={{ padding: '6px 8px', border: '1px solid #E2E8F0', textAlign: 'left', width: '25%' }}>Drop</th>
-                    <th style={{ padding: '6px 8px', border: '1px solid #E2E8F0', textAlign: 'right', width: '17%' }}>Advance</th>
+                    <th style={{ padding: '6px 8px', border: '1px solid #E2E8F0', textAlign: 'right', width: '17%' }}>Paid</th>
                     <th style={{ padding: '6px 8px', border: '1px solid #E2E8F0', textAlign: 'right', width: '18%' }}>Amount</th>
                   </tr>
                 </thead>
@@ -1029,7 +1748,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
                       <td style={{ padding: '5px 8px', border: '1px solid #E2E8F0' }}>{trip.pickupLocation}</td>
                       <td style={{ padding: '5px 8px', border: '1px solid #E2E8F0' }}>{trip.dropLocation}</td>
                       <td style={{ padding: '5px 8px', border: '1px solid #E2E8F0', textAlign: 'right' }}>
-                        ₹{(trip.advanceAmount || 0).toFixed(2)}
+                        ₹{(trip.paidAmount || 0).toFixed(2)}
                       </td>
                       <td style={{ padding: '5px 8px', border: '1px solid #E2E8F0', textAlign: 'right' }}>
                         ₹{trip.amount.toFixed(2)}
@@ -1040,29 +1759,59 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
                   <tr>
                     <td colSpan={3} style={{ padding: '6px 8px', border: '1px solid #E2E8F0', fontWeight: 700, textAlign: 'right', color: branding?.primaryColor || '#0B2B5E' }}>Sub Total</td>
                     <td style={{ padding: '6px 8px', border: '1px solid #E2E8F0', fontWeight: 700, textAlign: 'right', color: branding?.primaryColor || '#0B2B5E' }}>
-                      ₹{customerTrips.reduce((sum, trip) => sum + (trip.advanceAmount || 0), 0).toFixed(2)}
+                      ₹{billTotals.received.toFixed(2)}
                     </td>
                     <td style={{ padding: '6px 8px', border: '1px solid #E2E8F0', fontWeight: 700, textAlign: 'right', color: branding?.primaryColor || '#0B2B5E' }}>
-                      ₹{totalAmount.toFixed(2)}
+                      ₹{billTotals.subTotal.toFixed(2)}
                     </td>
                   </tr>
-                  {/* Less Advance Row */}
-                  {customerTrips.reduce((sum, trip) => sum + (trip.advanceAmount || 0), 0) > 0 && (
-                    <>
-                      <tr>
-                        <td colSpan={4} style={{ padding: '6px 8px', border: '1px solid #E2E8F0', fontWeight: 700, textAlign: 'right', color: '#7A5A00' }}>Less: Advance Paid</td>
-                        <td style={{ padding: '6px 8px', border: '1px solid #E2E8F0', fontWeight: 800, textAlign: 'right', color: '#7A5A00' }}>
-                          - ₹{customerTrips.reduce((sum, trip) => sum + (trip.advanceAmount || 0), 0).toFixed(2)}
-                        </td>
-                      </tr>
-                      {/* Net Payable Row */}
-                      <tr style={{ backgroundColor: '#EBF5EC' }}>
-                        <td colSpan={4} style={{ padding: '8px 8px', border: '1px solid #E2E8F0', fontWeight: 900, textAlign: 'right', color: '#0B5E1F', fontSize: '10pt' }}>NET PAYABLE</td>
-                        <td style={{ padding: '8px 8px', border: '1px solid #E2E8F0', fontWeight: 900, textAlign: 'right', color: '#0B5E1F', fontSize: '10.5pt' }}>
-                          ₹{(totalAmount - customerTrips.reduce((sum, trip) => sum + (trip.advanceAmount || 0), 0)).toFixed(2)}
-                        </td>
-                      </tr>
-                    </>
+                  {billTotals.discount > 0 && (
+                    <tr>
+                      <td colSpan={4} style={{ padding: '6px 8px', border: '1px solid #E2E8F0', fontWeight: 700, textAlign: 'right', color: '#A61B1B' }}>Discount</td>
+                      <td style={{ padding: '6px 8px', border: '1px solid #E2E8F0', fontWeight: 800, textAlign: 'right', color: '#A61B1B' }}>
+                        - ₹{billTotals.discount.toFixed(2)}
+                      </td>
+                    </tr>
+                  )}
+                  {billTotals.gstEnabled && (
+                    <tr>
+                      <td colSpan={4} style={{ padding: '6px 8px', border: '1px solid #E2E8F0', fontWeight: 700, textAlign: 'right', color: '#0B4EA6' }}>GST ({billTotals.gstPct}%)</td>
+                      <td style={{ padding: '6px 8px', border: '1px solid #E2E8F0', fontWeight: 800, textAlign: 'right', color: '#0B4EA6' }}>
+                        + ₹{billTotals.gstAmount.toFixed(2)}
+                      </td>
+                    </tr>
+                  )}
+                  {(billTotals.discount > 0 || billTotals.gstEnabled) && (
+                    <tr style={{ backgroundColor: '#F1F1F1' }}>
+                      <td colSpan={4} style={{ padding: '6px 8px', border: '1px solid #E2E8F0', fontWeight: 800, textAlign: 'right', color: '#1a1a1a' }}>Grand Total</td>
+                      <td style={{ padding: '6px 8px', border: '1px solid #E2E8F0', fontWeight: 800, textAlign: 'right', color: '#1a1a1a' }}>
+                        ₹{billTotals.grandTotal.toFixed(2)}
+                      </td>
+                    </tr>
+                  )}
+                  {billTotals.received > 0 && (
+                    <tr>
+                      <td colSpan={4} style={{ padding: '6px 8px', border: '1px solid #E2E8F0', fontWeight: 700, textAlign: 'right', color: '#7A5A00' }}>Less: Amount Received</td>
+                      <td style={{ padding: '6px 8px', border: '1px solid #E2E8F0', fontWeight: 800, textAlign: 'right', color: '#7A5A00' }}>
+                        - ₹{billTotals.received.toFixed(2)}
+                      </td>
+                    </tr>
+                  )}
+                  {billTotals.advanceApplied > 0 && (
+                    <tr>
+                      <td colSpan={4} style={{ padding: '6px 8px', border: '1px solid #E2E8F0', fontWeight: 700, textAlign: 'right', color: '#7A5A00' }}>Less: Advance Balance Applied</td>
+                      <td style={{ padding: '6px 8px', border: '1px solid #E2E8F0', fontWeight: 800, textAlign: 'right', color: '#7A5A00' }}>
+                        - ₹{billTotals.advanceApplied.toFixed(2)}
+                      </td>
+                    </tr>
+                  )}
+                  {billTotals.showBreakdown && (
+                    <tr style={{ backgroundColor: '#EBF5EC' }}>
+                      <td colSpan={4} style={{ padding: '8px 8px', border: '1px solid #E2E8F0', fontWeight: 900, textAlign: 'right', color: '#0B5E1F', fontSize: '10pt' }}>NET PAYABLE</td>
+                      <td style={{ padding: '8px 8px', border: '1px solid #E2E8F0', fontWeight: 900, textAlign: 'right', color: '#0B5E1F', fontSize: '10.5pt' }}>
+                        ₹{billTotals.netPayable.toFixed(2)}
+                      </td>
+                    </tr>
                   )}
                 </tbody>
               </table>
@@ -1072,9 +1821,14 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
             <Box sx={{ mb: 3, p: 1, bgcolor: '#fcfcfc', border: '1px dashed #ddd', borderRadius: '4px', fontSize: '9pt', color: '#555', zIndex: 1, position: 'relative' }}>
               <strong>Amount in Words:</strong> &nbsp;
               <span style={{ fontStyle: 'italic', textTransform: 'capitalize' }}>
-                {amountInWords.trim() || `${convertNumberToWords(Math.round(totalAmount))} Rupees Only`}
+                {amountInWords.trim() || `${convertNumberToWords(Math.round(billTotals.showBreakdown ? billTotals.netPayable : billTotals.subTotal))} Rupees Only`}
               </span>
             </Box>
+            {billTotals.advanceApplied > 0 && (
+              <Box sx={{ mb: 3, mt: -2, fontSize: '8.5pt', color: '#555', zIndex: 1, position: 'relative' }}>
+                Advance balance remaining after this bill: <strong>₹{(billTotals.advanceAvailable - billTotals.advanceApplied).toFixed(2)}</strong>
+              </Box>
+            )}
 
             {/* Footer Bank details */}
             <Box sx={{ borderTop: '2px double #CBD5E1', pt: 2, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 3, fontSize: '9pt', color: '#444', zIndex: 1, position: 'relative' }}>
@@ -1102,9 +1856,14 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
                 </table>
               </Box>
               <Box sx={{ textAlign: { xs: 'left', sm: 'right' }, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'flex-end' }, minWidth: '150px' }}>
-                <Typography variant="body2" sx={{ fontWeight: 600, color: '#333', fontStyle: 'italic', mb: 3 }}>
+                <Typography variant="body2" sx={{ fontWeight: 600, color: '#333', fontStyle: 'italic', mb: 1 }}>
                   For {branding?.companyName || 'Shivam Transport'}
                 </Typography>
+                {branding?.signatureDataUrl ? (
+                  <Box component="img" src={branding.signatureDataUrl} alt="Signature" sx={{ maxWidth: 140, maxHeight: 50, objectFit: 'contain', mb: 0.5 }} />
+                ) : (
+                  <Box sx={{ height: 38 }} />
+                )}
                 <Typography variant="body2" sx={{ fontWeight: 700, borderTop: '1px solid #666', pt: 0.5, width: '140px', textAlign: 'center', fontSize: '8.5pt' }}>
                   Authorized Signatory
                 </Typography>
@@ -1119,7 +1878,26 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
             </Box>
           </Box>
         </DialogContent>
-        <DialogActions sx={{ p: 2, bgcolor: '#f5f5f5', borderTop: '1px solid #ddd', gap: 1 }}>
+        <DialogActions
+          sx={{
+            p: { xs: 1.5, sm: 2 },
+            bgcolor: '#f5f5f5',
+            borderTop: '1px solid #ddd',
+            gap: 1,
+            flexWrap: 'wrap',
+            '& > button': { flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' } },
+          }}
+        >
+          <Button
+            variant="outlined"
+            onClick={handleSaveToMyBills}
+            disabled={savingBillRecord}
+            startIcon={<Bookmark />}
+            sx={{ fontWeight: 700 }}
+          >
+            {savingBillRecord ? 'Saving...' : 'Save to My Bills'}
+          </Button>
+
           <Button
             variant="outlined"
             onClick={() => setIsPreviewOpen(false)}
@@ -1141,16 +1919,15 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
             </Button>
           )}
 
-          {customer?.phone && (
-            <Button
-              variant="outlined"
-              onClick={handleWhatsAppBill}
-              startIcon={<WhatsApp />}
-              sx={{ fontWeight: 700, color: '#25D366', borderColor: '#25D366' }}
-            >
-              WhatsApp
-            </Button>
-          )}
+          <Button
+            variant="outlined"
+            onClick={handleWhatsAppBill}
+            disabled={sharingBill}
+            startIcon={<WhatsApp />}
+            sx={{ fontWeight: 700, color: '#25D366', borderColor: '#25D366' }}
+          >
+            {sharingBill ? 'Preparing PDF...' : 'WhatsApp'}
+          </Button>
 
           {customer?.email && (
             <Button
@@ -1172,6 +1949,349 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
             sx={{ fontWeight: 700, color: '#000' }}
           >
             Print / Save PDF
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Customer Dialog */}
+      <Dialog open={isEditCustomerOpen} onClose={() => setIsEditCustomerOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Edit Customer</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 0.5 }}>
+            <TextField
+              label="Name"
+              value={editCustomerForm.name}
+              onChange={e => setEditCustomerForm(prev => ({ ...prev, name: e.target.value }))}
+              fullWidth
+              autoFocus
+            />
+            <TextField
+              label="Phone"
+              value={editCustomerForm.phone}
+              onChange={e => setEditCustomerForm(prev => ({ ...prev, phone: e.target.value }))}
+              fullWidth
+            />
+            <TextField
+              label="Address"
+              value={editCustomerForm.address}
+              onChange={e => setEditCustomerForm(prev => ({ ...prev, address: e.target.value }))}
+              fullWidth
+              multiline
+              rows={2}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsEditCustomerOpen(false)}>Cancel</Button>
+          <Button onClick={handleSaveCustomerEdit} variant="contained" disabled={savingCustomerEdit} sx={{ color: '#0B0E11', fontWeight: 700 }}>
+            {savingCustomerEdit ? 'Saving...' : 'Save Changes'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Similar-name collision warning */}
+      <Dialog open={Boolean(collisionMatch)} onClose={() => { setCollisionMatch(null); setPendingCustomerEdit(null); }} maxWidth="xs" fullWidth>
+        <DialogTitle>This looks like a duplicate</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            "{pendingCustomerEdit?.name}" is very similar to an existing customer, "{collisionMatch?.name}".
+            Are these the same customer?
+          </Alert>
+          <Typography variant="body2" sx={{ color: '#848E9C' }}>
+            Merging moves all trips from this record onto "{collisionMatch?.name}" and removes this duplicate.
+            Choose "Keep Separate" if they're genuinely two different customers who happen to have similar names.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
+          <Button onClick={() => { setCollisionMatch(null); setPendingCustomerEdit(null); }}>Cancel</Button>
+          <Button onClick={handleKeepAsSeparateCustomer} variant="outlined" disabled={savingCustomerEdit}>
+            Keep Separate
+          </Button>
+          <Button onClick={handleMergeIntoExisting} variant="contained" color="warning" disabled={mergingCustomer} sx={{ fontWeight: 700 }}>
+            {mergingCustomer ? 'Merging...' : `Merge into "${collisionMatch?.name}"`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Add Advance Payment Dialog */}
+      <Dialog open={isAdvanceDialogOpen} onClose={() => setIsAdvanceDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Add Advance Payment</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 0.5 }}>
+            <Typography variant="body2" sx={{ color: '#848E9C' }}>
+              Record money this customer has already paid ahead of any specific trip — it'll be available to
+              draw down later when settling a trip's payment.
+            </Typography>
+            <TextField
+              label="Amount"
+              type="number"
+              value={advanceAmountInput}
+              onChange={e => setAdvanceAmountInput(e.target.value)}
+              fullWidth
+              autoFocus
+              InputProps={{ startAdornment: <InputAdornment position="start">₹</InputAdornment> }}
+            />
+            <TextField
+              label="Date"
+              type="date"
+              value={advanceDateInput}
+              onChange={e => setAdvanceDateInput(e.target.value)}
+              fullWidth
+              InputLabelProps={{ shrink: true }}
+            />
+            <TextField
+              label="Note (optional)"
+              value={advanceNote}
+              onChange={e => setAdvanceNote(e.target.value)}
+              fullWidth
+              placeholder="e.g. Paid in cash on 25 July"
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsAdvanceDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleAddAdvance} variant="contained" disabled={savingAdvance} sx={{ color: '#0B0E11', fontWeight: 700 }}>
+            {savingAdvance ? 'Saving...' : 'Add Advance'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Advance Balance — full history (date, note, amount) behind the header button */}
+      <Dialog open={isAdvanceHistoryOpen} onClose={() => setIsAdvanceHistoryOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Advance Balance</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
+            <Savings sx={{ color: '#F0B90B' }} />
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>Available balance:</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 800, color: (customer.advanceBalance || 0) > 0 ? '#0ECB81' : 'text.primary' }}>
+              ₹{(customer.advanceBalance || 0).toFixed(2)}
+            </Typography>
+            <Button
+              size="small"
+              startIcon={<Add />}
+              onClick={() => { setIsAdvanceHistoryOpen(false); openAddAdvanceDialog(); }}
+              sx={{ ml: 'auto', color: '#F0B90B', fontWeight: 700 }}
+            >
+              Add Advance Payment
+            </Button>
+          </Box>
+
+          {/* Search + amount-range + date filters */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mb: 2 }}>
+            <TextField
+              size="small"
+              fullWidth
+              placeholder="Search by note, amount, or date..."
+              value={advanceSearchTerm}
+              onChange={e => setAdvanceSearchTerm(e.target.value)}
+              InputProps={{ startAdornment: <InputAdornment position="start"><FilterAlt fontSize="small" sx={{ color: '#848E9C' }} /></InputAdornment> }}
+            />
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
+              <TextField
+                label="Min Amount" type="number" size="small"
+                value={advanceAmountMin} onChange={e => setAdvanceAmountMin(e.target.value)}
+                sx={{ minWidth: 120, flex: 1 }}
+                InputProps={{ startAdornment: <InputAdornment position="start">₹</InputAdornment> }}
+              />
+              <TextField
+                label="Max Amount" type="number" size="small"
+                value={advanceAmountMax} onChange={e => setAdvanceAmountMax(e.target.value)}
+                sx={{ minWidth: 120, flex: 1 }}
+                InputProps={{ startAdornment: <InputAdornment position="start">₹</InputAdornment> }}
+              />
+              <TextField
+                label="From" type="date" size="small"
+                value={advanceDateFrom} onChange={e => setAdvanceDateFrom(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+                sx={{ minWidth: 140, flex: 1 }}
+              />
+              <TextField
+                label="To" type="date" size="small"
+                value={advanceDateTo} onChange={e => setAdvanceDateTo(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+                sx={{ minWidth: 140, flex: 1 }}
+              />
+              {isAdvanceFiltered && (
+                <Button
+                  size="small"
+                  startIcon={<Clear />}
+                  onClick={() => { setAdvanceSearchTerm(''); setAdvanceAmountMin(''); setAdvanceAmountMax(''); setAdvanceDateFrom(''); setAdvanceDateTo(''); }}
+                  sx={{ color: '#848E9C' }}
+                >
+                  Clear
+                </Button>
+              )}
+            </Box>
+          </Box>
+
+          {activeAdvanceHistory.length > 0 ? (
+            <List sx={{ p: 0 }}>
+              {activeAdvanceHistory.map(entry => (
+                <ListItem
+                  key={entry.id}
+                  disableGutters
+                  sx={{ py: 1.25, px: 1.5, mb: 1, borderRadius: 1.5, border: '1px solid', borderColor: 'divider' }}
+                  secondaryAction={
+                    <Tooltip title="Delete this advance payment">
+                      <IconButton
+                        edge="end"
+                        size="small"
+                        onClick={() => setDeleteAdvanceEntry({ id: entry.id, amount: entry.amount, note: entry.note })}
+                        sx={{ color: '#848E9C', '&:hover': { color: '#F6465D' } }}
+                      >
+                        <Delete fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  }
+                >
+                  <ListItemText
+                    sx={{ pr: 5 }}
+                    primary={
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {new Date(entry.date).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: '2-digit' })}
+                        </Typography>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#0ECB81' }}>
+                          +₹{entry.amount.toFixed(2)}
+                        </Typography>
+                      </Box>
+                    }
+                    secondary={entry.note || 'No note'}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          ) : (
+            <Alert severity="info">{isAdvanceFiltered ? 'No advance payments match these filters.' : 'No advance payments recorded yet.'}</Alert>
+          )}
+
+          {deletedAdvanceHistory.length > 0 && (
+            <Box sx={{ mt: 3 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#848E9C', mb: 1 }}>
+                Deleted Payments (kept for record only)
+              </Typography>
+              <List sx={{ p: 0 }}>
+                {deletedAdvanceHistory.map(entry => (
+                  <ListItem
+                    key={entry.id}
+                    disableGutters
+                    sx={{ py: 1, px: 1.5, mb: 1, borderRadius: 1.5, border: '1px dashed', borderColor: 'divider', opacity: 0.65 }}
+                    secondaryAction={
+                      <Tooltip title="Permanently delete this record">
+                        <IconButton
+                          edge="end"
+                          size="small"
+                          onClick={() => setPermanentDeleteEntry({ id: entry.id, amount: entry.amount, note: entry.note })}
+                          sx={{ color: '#848E9C', '&:hover': { color: '#F6465D' } }}
+                        >
+                          <Delete fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    }
+                  >
+                    <ListItemText
+                      sx={{ pr: 5 }}
+                      primary={
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography variant="body2" sx={{ fontWeight: 600, textDecoration: entry.usedInBillNo ? 'none' : 'line-through' }}>
+                            {new Date(entry.date).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: '2-digit' })}
+                          </Typography>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 800, textDecoration: entry.usedInBillNo ? 'none' : 'line-through', color: '#848E9C' }}>
+                            +₹{entry.amount.toFixed(2)}
+                          </Typography>
+                        </Box>
+                      }
+                      secondary={
+                        entry.usedInBillNo
+                          ? `Used in bill (Bill #${entry.usedInBillNo})`
+                          : `${entry.note || 'No note'}${entry.deletedAt ? ` · Deleted ${new Date(entry.deletedAt).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: '2-digit' })}` : ''}`
+                      }
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsAdvanceHistoryOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete-advance confirmation — stacks on top of the history dialog above */}
+      <Dialog open={Boolean(deleteAdvanceEntry)} onClose={() => setDeleteAdvanceEntry(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete Advance Payment?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            Are you sure you want to delete this ₹{deleteAdvanceEntry?.amount.toFixed(2)} advance
+            {deleteAdvanceEntry?.note ? ` ("${deleteAdvanceEntry.note}")` : ''}? This will also subtract it from the
+            available advance balance and cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteAdvanceEntry(null)}>Cancel</Button>
+          <Button
+            onClick={handleConfirmDeleteAdvance}
+            variant="contained"
+            color="error"
+            disabled={deletingAdvance}
+            sx={{ fontWeight: 700 }}
+          >
+            {deletingAdvance ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Permanent delete confirmation — irreversible, so it gets a stronger warning */}
+      <Dialog open={Boolean(permanentDeleteEntry)} onClose={() => setPermanentDeleteEntry(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Permanently Delete This Record?</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            This will be permanently deleted and cannot be restored.
+          </Alert>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            Are you sure you want to permanently delete this ₹{permanentDeleteEntry?.amount.toFixed(2)} record
+            {permanentDeleteEntry?.note ? ` ("${permanentDeleteEntry.note}")` : ''}?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPermanentDeleteEntry(null)}>Cancel</Button>
+          <Button
+            onClick={handleConfirmPermanentDelete}
+            variant="contained"
+            color="error"
+            disabled={permanentlyDeletingAdvance}
+            sx={{ fontWeight: 700 }}
+          >
+            {permanentlyDeletingAdvance ? 'Deleting...' : 'Yes, Delete Permanently'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Trip History "Download Bill" — ask whether to apply the advance balance first, since a
+          single-trip bill is often for a different purpose than the main aggregated bill. */}
+      <Dialog open={Boolean(tripBillAdvancePrompt)} onClose={() => setTripBillAdvancePrompt(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Apply Advance Balance?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            This customer has ₹{(customer.advanceBalance || 0).toFixed(2)} in advance balance. Should it be applied
+            against this trip's bill?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTripBillAdvancePrompt(null)}>Cancel</Button>
+          <Button
+            onClick={() => { if (tripBillAdvancePrompt) generateTripBillDownload(tripBillAdvancePrompt, false); setTripBillAdvancePrompt(null); }}
+            variant="outlined"
+          >
+            No, Skip
+          </Button>
+          <Button
+            onClick={() => { if (tripBillAdvancePrompt) generateTripBillDownload(tripBillAdvancePrompt, true); setTripBillAdvancePrompt(null); }}
+            variant="contained"
+            sx={{ color: '#0B0E11', fontWeight: 700 }}
+          >
+            Yes, Apply
           </Button>
         </DialogActions>
       </Dialog>

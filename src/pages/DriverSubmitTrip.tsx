@@ -1,218 +1,314 @@
 import { useState } from 'react';
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
-  Divider,
+  Checkbox,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControlLabel,
   GridLegacy as Grid,
   InputAdornment,
   Paper,
   TextField,
   Typography,
 } from '@mui/material';
-import { Send } from '@mui/icons-material';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { PersonAdd, Send } from '@mui/icons-material';
 import { useAppContext } from '../context/AppContext';
+import type { Customer } from '../types';
 
+// A draft ("new customer") never has a real id yet — it only gets one once the admin approves
+// the trip and the backend resolves/creates the matching customer record.
+type DraftCustomer = { name: string; phone: string; address: string };
+const EMPTY_NEW_CUSTOMER: DraftCustomer = { name: '', phone: '', address: '' };
+
+const emptyTripFields = {
+  date: new Date(),
+  pickupLocation: '',
+  dropLocation: '',
+  vehicleType: '',
+  vehicleNumber: '',
+  materialType: '',
+  amount: '',
+  advanceAmount: '',
+  isPaid: false,
+};
+
+// Mirrors the admin's "Add Trip" page (customer picker + New Customer dialog + identical trip
+// fields) — the only difference under the hood is that this goes through submitDriverTrip, which
+// keeps the offline queue (submit with no signal, sync automatically once reconnected) and lands
+// the trip as "pending" for the admin to approve, rather than adding it already-approved.
 const DriverSubmitTrip = () => {
-  const { submitDriverTrip } = useAppContext();
-  const [form, setForm] = useState({
-    customerName: '',
-    customerPhone: '',
-    customerAddress: '',
-    date: new Date().toISOString().slice(0, 10),
-    pickupLocation: '',
-    dropLocation: '',
-    vehicleType: '',
-    vehicleNumber: '',
-    materialType: '',
-    amount: '',
-    advanceAmount: '',
-  });
+  const { customers, submitDriverTrip } = useAppContext();
+  const [pickedExisting, setPickedExisting] = useState<Customer | null>(null);
+  const [draftCustomer, setDraftCustomer] = useState<DraftCustomer | null>(null);
+  const selectedCustomer = pickedExisting || draftCustomer;
+
+  const [isNewCustomerOpen, setIsNewCustomerOpen] = useState(false);
+  const [newCustomer, setNewCustomer] = useState(EMPTY_NEW_CUSTOMER);
+  const [newCustomerError, setNewCustomerError] = useState('');
+
+  const [tripFields, setTripFields] = useState(emptyTripFields);
   const [message, setMessage] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const updateField = (name: string, value: string) => {
-    setForm(prev => ({ ...prev, [name]: value }));
+  const updateField = (name: keyof typeof emptyTripFields, value: string) =>
+    setTripFields(prev => ({ ...prev, [name]: value }));
+
+  const handleCreateCustomer = () => {
+    const name = newCustomer.name.trim();
+    if (!name) {
+      setNewCustomerError('Name is required');
+      return;
+    }
+    setPickedExisting(null);
+    setDraftCustomer({ name, phone: newCustomer.phone.trim(), address: newCustomer.address.trim() });
+    setIsNewCustomerOpen(false);
+    setNewCustomer(EMPTY_NEW_CUSTOMER);
+    setNewCustomerError('');
   };
 
   const handleSubmit = async () => {
+    if (!selectedCustomer) return;
     setMessage(null);
+    if (tripFields.date.getTime() > Date.now()) {
+      setMessage({ type: 'error', text: 'Trip date cannot be in the future.' });
+      return;
+    }
     setLoading(true);
     try {
       const result = await submitDriverTrip({
-        customerName: form.customerName.trim(),
-        customerPhone: form.customerPhone.trim(),
-        customerAddress: form.customerAddress.trim(),
-        date: new Date(form.date).toISOString(),
-        pickupLocation: form.pickupLocation.trim(),
-        dropLocation: form.dropLocation.trim(),
-        vehicleType: form.vehicleType.trim(),
-        vehicleNumber: form.vehicleNumber.trim(),
-        materialType: form.materialType.trim(),
-        amount: Number(form.amount),
-        advanceAmount: Number(form.advanceAmount || 0),
-        isPaid: false,
+        customerId: pickedExisting?.id,
+        customerName: selectedCustomer.name,
+        customerPhone: selectedCustomer.phone,
+        customerAddress: selectedCustomer.address,
+        date: tripFields.date.toISOString(),
+        pickupLocation: tripFields.pickupLocation.trim(),
+        dropLocation: tripFields.dropLocation.trim(),
+        vehicleType: tripFields.vehicleType.trim(),
+        vehicleNumber: tripFields.vehicleNumber.trim(),
+        materialType: tripFields.materialType.trim(),
+        amount: Number(tripFields.amount) || 0,
+        advanceAmount: Number(tripFields.advanceAmount || 0),
+        isPaid: tripFields.isPaid,
       });
-      setForm(prev => ({
-        ...prev,
-        customerName: '',
-        customerPhone: '',
-        customerAddress: '',
-        pickupLocation: '',
-        dropLocation: '',
-        vehicleType: '',
-        vehicleNumber: '',
-        materialType: '',
-        amount: '',
-        advanceAmount: '',
-      }));
+      setPickedExisting(null);
+      setDraftCustomer(null);
+      setTripFields(emptyTripFields);
       setMessage(
         result.queued
           ? { type: 'warning', text: "No connection right now — saved on your phone and will send automatically once you're back online." }
           : { type: 'success', text: 'Trip submitted. Admin will review it now.' }
       );
     } catch (error) {
-      setMessage({
-        type: 'error',
-        text: error instanceof Error ? error.message : 'Could not submit trip',
-      });
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Could not submit trip' });
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Paper elevation={0} sx={{ p: { xs: 2, sm: 4 }, bgcolor: '#161A1E', border: '1px solid #2B3139' }}>
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h5" sx={{ color: '#F0B90B', fontWeight: 800 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <Box>
+        <Typography variant="h5" component="h1" sx={{ fontWeight: 700, color: '#EAECEF' }}>
           Submit Trip
         </Typography>
-        <Typography variant="body2" sx={{ color: '#848E9C' }}>
-          This reaches the admin dashboard immediately after submission.
+        <Typography variant="body2" sx={{ color: '#848E9C', mt: 0.5 }}>
+          Pick a customer, then fill in the trip details. This reaches the admin dashboard immediately after submission.
         </Typography>
       </Box>
-      <Divider sx={{ mb: 3, borderColor: '#2B3139' }} />
 
-      {message && <Alert severity={message.type} sx={{ mb: 3 }}>{message.text}</Alert>}
+      {message && <Alert severity={message.type}>{message.text}</Alert>}
 
-      <Grid container spacing={2.5}>
-        <Grid item xs={12} sm={6}>
-          <TextField
-            label="Customer Name"
-            value={form.customerName}
-            onChange={event => updateField('customerName', event.target.value)}
-            fullWidth
-            required
+      <Paper elevation={0} sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, background: '#161A1E', border: '1px solid #2B3139' }}>
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <Autocomplete
+            options={customers}
+            getOptionLabel={(option: Customer) => `${option.name}${option.phone ? ` — ${option.phone}` : ''}`}
+            value={pickedExisting}
+            onChange={(_, value) => { setPickedExisting(value); setDraftCustomer(null); }}
+            isOptionEqualToValue={(option, value) => option.id === value.id}
+            sx={{ flex: 1, minWidth: 240 }}
+            renderInput={params => <TextField {...params} label="Customer" placeholder="Search customers..." />}
           />
-        </Grid>
-        <Grid item xs={12} sm={6}>
-          <TextField
-            label="Customer Phone"
-            value={form.customerPhone}
-            onChange={event => updateField('customerPhone', event.target.value)}
-            fullWidth
-          />
-        </Grid>
-        <Grid item xs={12}>
-          <TextField
-            label="Customer Address"
-            value={form.customerAddress}
-            onChange={event => updateField('customerAddress', event.target.value)}
-            fullWidth
-            multiline
-            rows={2}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6}>
-          <TextField
-            label="Trip Date"
-            type="date"
-            value={form.date}
-            onChange={event => updateField('date', event.target.value)}
-            fullWidth
-            InputLabelProps={{ shrink: true }}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6}>
-          <TextField
-            label="Vehicle Type"
-            value={form.vehicleType}
-            onChange={event => updateField('vehicleType', event.target.value)}
-            fullWidth
-            required
-          />
-        </Grid>
-        <Grid item xs={12} sm={6}>
-          <TextField
-            label="Vehicle Number"
-            placeholder="e.g. MH12AB1234"
-            value={form.vehicleNumber}
-            onChange={event => updateField('vehicleNumber', event.target.value.toUpperCase())}
-            fullWidth
-          />
-        </Grid>
-        <Grid item xs={12} sm={6}>
-          <TextField
-            label="Pickup Location"
-            value={form.pickupLocation}
-            onChange={event => updateField('pickupLocation', event.target.value)}
-            fullWidth
-            required
-          />
-        </Grid>
-        <Grid item xs={12} sm={6}>
-          <TextField
-            label="Drop Location"
-            value={form.dropLocation}
-            onChange={event => updateField('dropLocation', event.target.value)}
-            fullWidth
-            required
-          />
-        </Grid>
-        <Grid item xs={12} sm={6}>
-          <TextField
-            label="Material Type"
-            value={form.materialType}
-            onChange={event => updateField('materialType', event.target.value)}
-            fullWidth
-          />
-        </Grid>
-        <Grid item xs={12} sm={3}>
-          <TextField
-            label="Amount"
-            value={form.amount}
-            onChange={event => updateField('amount', event.target.value)}
-            type="number"
-            fullWidth
-            required
-            InputProps={{ startAdornment: <InputAdornment position="start">₹</InputAdornment> }}
-          />
-        </Grid>
-        <Grid item xs={12} sm={3}>
-          <TextField
-            label="Advance"
-            value={form.advanceAmount}
-            onChange={event => updateField('advanceAmount', event.target.value)}
-            type="number"
-            fullWidth
-            InputProps={{ startAdornment: <InputAdornment position="start">₹</InputAdornment> }}
-          />
-        </Grid>
-        <Grid item xs={12}>
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <Button
-              variant="contained"
-              startIcon={<Send />}
-              onClick={handleSubmit}
-              disabled={loading}
-              sx={{ color: '#0B0E11', fontWeight: 800 }}
-            >
-              {loading ? 'Submitting...' : 'Submit Trip'}
-            </Button>
+          <Button
+            variant="outlined"
+            startIcon={<PersonAdd />}
+            onClick={() => setIsNewCustomerOpen(true)}
+            sx={{ height: 56, fontWeight: 700 }}
+          >
+            New Customer
+          </Button>
+        </Box>
+        {draftCustomer && (
+          <Typography variant="body2" sx={{ color: '#F0B90B', mt: 1.5, fontWeight: 600 }}>
+            New customer: {draftCustomer.name}{draftCustomer.phone ? ` — ${draftCustomer.phone}` : ''}
+          </Typography>
+        )}
+      </Paper>
+
+      {selectedCustomer ? (
+        <Paper elevation={0} sx={{ p: { xs: 2, sm: 4 }, borderRadius: 2, background: '#161A1E', border: '1px solid #2B3139' }}>
+          <Typography variant="h5" gutterBottom sx={{ fontWeight: 700, mb: 2, color: '#EAECEF' }}>
+            Add New Trip for <span style={{ color: '#F0B90B' }}>{selectedCustomer.name}</span>
+          </Typography>
+          <Grid container spacing={3}>
+            <Grid item xs={12} sm={6}>
+              <LocalizationProvider dateAdapter={AdapterDateFns}>
+                <DatePicker
+                  label="Trip Date"
+                  value={tripFields.date}
+                  maxDate={new Date()}
+                  onChange={value => setTripFields(prev => ({ ...prev, date: (value as Date | null) || new Date() }))}
+                  slotProps={{ textField: { fullWidth: true, helperText: 'Future dates are not allowed' } }}
+                />
+              </LocalizationProvider>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Vehicle Type"
+                value={tripFields.vehicleType}
+                onChange={e => updateField('vehicleType', e.target.value)}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Vehicle Number"
+                placeholder="e.g. MH12AB1234"
+                value={tripFields.vehicleNumber}
+                onChange={e => updateField('vehicleNumber', e.target.value.toUpperCase())}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Pickup Location"
+                value={tripFields.pickupLocation}
+                onChange={e => updateField('pickupLocation', e.target.value)}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Drop Location"
+                value={tripFields.dropLocation}
+                onChange={e => updateField('dropLocation', e.target.value)}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Material Type"
+                value={tripFields.materialType}
+                onChange={e => updateField('materialType', e.target.value)}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Amount"
+                type="number"
+                value={tripFields.amount}
+                onChange={e => updateField('amount', e.target.value)}
+                InputProps={{ startAdornment: <InputAdornment position="start">₹</InputAdornment> }}
+                placeholder="Enter amount"
+                autoFocus
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Advance Amount"
+                type="number"
+                value={tripFields.advanceAmount}
+                onChange={e => updateField('advanceAmount', e.target.value)}
+                InputProps={{ startAdornment: <InputAdornment position="start">₹</InputAdornment> }}
+                placeholder="Enter advance"
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Box sx={{ height: '100%', display: 'flex', alignItems: 'center' }}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={tripFields.isPaid}
+                      onChange={e => setTripFields(prev => ({ ...prev, isPaid: e.target.checked }))}
+                      sx={{
+                        color: '#848E9C',
+                        '&.Mui-checked': { color: '#0ECB81' },
+                      }}
+                    />
+                  }
+                  label={<Typography sx={{ fontWeight: 600, color: tripFields.isPaid ? '#0ECB81' : '#848E9C' }}>Payment Received</Typography>}
+                />
+              </Box>
+            </Grid>
+            <Grid item xs={12}>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+                <Button
+                  variant="contained"
+                  startIcon={<Send />}
+                  onClick={handleSubmit}
+                  disabled={loading}
+                  sx={{ color: '#0B0E11', fontWeight: 800 }}
+                >
+                  {loading ? 'Submitting...' : 'Submit Trip'}
+                </Button>
+              </Box>
+            </Grid>
+          </Grid>
+        </Paper>
+      ) : (
+        <Paper elevation={0} sx={{ p: 4, borderRadius: 2, background: '#161A1E', border: '1px dashed #2B3139', textAlign: 'center' }}>
+          <Typography sx={{ color: '#848E9C' }}>Select or create a customer above to add a trip for them.</Typography>
+        </Paper>
+      )}
+
+      {/* Create New Customer Dialog */}
+      <Dialog open={isNewCustomerOpen} onClose={() => setIsNewCustomerOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>New Customer</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
+            {newCustomerError && <Alert severity="error">{newCustomerError}</Alert>}
+            <TextField
+              autoFocus
+              label="Customer Name"
+              value={newCustomer.name}
+              onChange={e => setNewCustomer(prev => ({ ...prev, name: e.target.value }))}
+              fullWidth
+            />
+            <TextField
+              label="Phone Number"
+              value={newCustomer.phone}
+              onChange={e => setNewCustomer(prev => ({ ...prev, phone: e.target.value }))}
+              fullWidth
+            />
+            <TextField
+              label="Address (Optional)"
+              value={newCustomer.address}
+              onChange={e => setNewCustomer(prev => ({ ...prev, address: e.target.value }))}
+              fullWidth
+              multiline
+              rows={2}
+            />
           </Box>
-        </Grid>
-      </Grid>
-    </Paper>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsNewCustomerOpen(false)}>Cancel</Button>
+          <Button onClick={handleCreateCustomer} variant="contained" sx={{ color: '#0B0E11', fontWeight: 700 }}>
+            Create &amp; Select
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
   );
 };
 

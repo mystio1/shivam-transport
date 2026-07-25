@@ -29,12 +29,13 @@ const TripForm: React.FC<TripFormProps> = ({ customerId, onTripAdded }) => {
   console.log('TripForm rendered with customerId:', customerId);
   console.log('Found customer:', customer);
 
-  const [tripData, setTripData] = useState<Omit<Trip, 'id'>>({  
+  const [tripData, setTripData] = useState<Omit<Trip, 'id'>>({
     customerId,
     date: new Date().toISOString(),
     pickupLocation: '',
     dropLocation: '',
     vehicleType: '',
+    vehicleNumber: '',
     materialType: '',
     advanceAmount: 0,
     amount: 0,
@@ -148,6 +149,7 @@ const TripForm: React.FC<TripFormProps> = ({ customerId, onTripAdded }) => {
           pickupLocation: '',
           dropLocation: '',
           vehicleType: '',
+          vehicleNumber: '',
           materialType: '',
           amount: 0,
           isPaid: false,
@@ -206,6 +208,18 @@ const TripForm: React.FC<TripFormProps> = ({ customerId, onTripAdded }) => {
               variant="outlined"
               error={!!errors.vehicleType}
               helperText={errors.vehicleType}
+            />
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <TextField
+              fullWidth
+              label="Vehicle Number"
+              name="vehicleNumber"
+              placeholder="e.g. MH12AB1234"
+              value={tripData.vehicleNumber || ''}
+              onChange={e => setTripData(prev => ({ ...prev, vehicleNumber: e.target.value.toUpperCase() }))}
+              variant="outlined"
             />
           </Grid>
 

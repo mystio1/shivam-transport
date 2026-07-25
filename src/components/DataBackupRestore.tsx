@@ -13,7 +13,7 @@ interface DataBackupRestoreProps {
 }
 
 const DataBackupRestore: React.FC<DataBackupRestoreProps> = ({ open, onClose, mode }) => {
-  const { customers, trips } = useAppContext();
+  const { customers, trips, restoreBackup } = useAppContext();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
 
@@ -55,11 +55,14 @@ const DataBackupRestore: React.FC<DataBackupRestoreProps> = ({ open, onClose, mo
         return;
       }
       const parsed = JSON.parse(fileContent);
-      if (!parsed.customers || !parsed.trips) {
+      if (!Array.isArray(parsed.customers) || !Array.isArray(parsed.trips)) {
         throw new Error('Invalid backup file format');
       }
-      setResult({ success: true, message: 'File loaded. Please refresh the page to apply restored data.' });
-      setTimeout(() => window.location.reload(), 2000);
+      const { customersImported, tripsImported } = await restoreBackup(parsed.customers, parsed.trips);
+      setResult({
+        success: true,
+        message: `Imported ${customersImported} customer${customersImported === 1 ? '' : 's'} and ${tripsImported} trip${tripsImported === 1 ? '' : 's'}. Existing data was left untouched.`,
+      });
     } catch (error) {
       setResult({ success: false, message: `Restore failed: ${error instanceof Error ? error.message : String(error)}` });
     } finally {
@@ -82,7 +85,7 @@ const DataBackupRestore: React.FC<DataBackupRestoreProps> = ({ open, onClose, mo
             <Typography sx={{ mt: 1 }}>
               {mode === 'backup'
                 ? 'Downloads all customer and trip data as a JSON file to your computer.'
-                : 'Upload a previously downloaded backup file to restore data. This cannot be undone.'}
+                : "Upload a previously downloaded backup file — its customers and trips (even from a different account) are imported into this one. Your existing data isn't removed or overwritten."}
             </Typography>
           )}
         </Box>

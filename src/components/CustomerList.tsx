@@ -255,36 +255,36 @@ const CustomerList: React.FC = () => {
           mb: 4
         }}>
           {/* Total Customers Card */}
-          <Card 
+          <Card
             onClick={() => { setFilterPending(false); setSearchTerm(''); setFilterDate(null); }}
-            sx={{ 
-              height: '140px',
-              borderRadius: 2, 
+            sx={{
+              height: { xs: '124px', sm: '140px' },
+              borderRadius: 2,
               background: filterPending ? '#161A1E' : '#1E2820',
               borderTop: `3px solid ${!filterPending && !searchTerm && !filterDate ? '#F0B90B' : '#2B3139'}`,
-              color: '#EAECEF', 
-              boxShadow: '0 4px 12px rgba(0,0,0,0.2)', 
-              transition: 'transform 0.3s, box-shadow 0.3s', 
+              color: '#EAECEF',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+              transition: 'transform 0.3s, box-shadow 0.3s',
               cursor: 'pointer',
               '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 8px 24px rgba(240, 185, 11, 0.15)' },
               display: 'flex',
               flexDirection: 'column'
             }}>
-            <CardContent sx={{ p: 2, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#848E9C', lineHeight: 1.2 }}>
+            <CardContent sx={{ p: { xs: 1.5, sm: 2 }, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1, gap: 0.5 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#848E9C', lineHeight: 1.2, fontSize: { xs: '0.75rem', sm: '1rem' } }}>
                   Total Customers
                 </Typography>
-                <Avatar sx={{ bgcolor: 'rgba(240, 185, 11, 0.1)', color: '#F0B90B', width: 36, height: 36 }}>
-                  <Person sx={{ fontSize: 18 }} />
+                <Avatar sx={{ bgcolor: 'rgba(240, 185, 11, 0.1)', color: '#F0B90B', width: { xs: 28, sm: 36 }, height: { xs: 28, sm: 36 }, flexShrink: 0 }}>
+                  <Person sx={{ fontSize: { xs: 15, sm: 18 } }} />
                 </Avatar>
               </Box>
-              <Box>
-                <Typography variant="h3" sx={{ fontWeight: 800, fontSize: '2.2rem', color: '#EAECEF', lineHeight: 1 }}>
+              <Box sx={{ overflow: 'hidden' }}>
+                <Typography variant="h3" sx={{ fontWeight: 800, fontSize: { xs: '1.5rem', sm: '2.2rem' }, color: '#EAECEF', lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {isFiltered ? visibleStats.length : totalCustomers}
                 </Typography>
                 {isFiltered && (
-                  <Typography variant="body2" sx={{ color: '#848E9C', mt: 0.5 }}>
+                  <Typography variant="body2" sx={{ color: '#848E9C', mt: 0.5, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
                     of {totalCustomers} total
                   </Typography>
                 )}
@@ -293,36 +293,36 @@ const CustomerList: React.FC = () => {
           </Card>
 
           {/* Customers with Pending Dues Card */}
-          <Card 
+          <Card
             onClick={() => setFilterPending(prev => !prev)}
-            sx={{ 
-              height: '140px',
-              borderRadius: 2, 
+            sx={{
+              height: { xs: '124px', sm: '140px' },
+              borderRadius: 2,
               background: filterPending ? '#2A0D12' : '#161A1E',
               borderTop: `3px solid #F6465D`,
-              color: '#EAECEF', 
-              boxShadow: filterPending ? '0 8px 24px rgba(246,70,93,0.3)' : '0 4px 12px rgba(0,0,0,0.2)', 
-              transition: 'transform 0.3s, box-shadow 0.3s', 
+              color: '#EAECEF',
+              boxShadow: filterPending ? '0 8px 24px rgba(246,70,93,0.3)' : '0 4px 12px rgba(0,0,0,0.2)',
+              transition: 'transform 0.3s, box-shadow 0.3s',
               cursor: 'pointer',
               outline: filterPending ? '2px solid #F6465D' : 'none',
               '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 8px 24px rgba(246, 70, 93, 0.25)' },
               display: 'flex',
               flexDirection: 'column'
             }}>
-            <CardContent sx={{ p: 2, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#848E9C', lineHeight: 1.2 }}>
+            <CardContent sx={{ p: { xs: 1.5, sm: 2 }, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1, gap: 0.5 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#848E9C', lineHeight: 1.2, fontSize: { xs: '0.75rem', sm: '1rem' } }}>
                   With Pending Dues
                 </Typography>
-                <Avatar sx={{ bgcolor: 'rgba(246, 70, 93, 0.1)', color: '#F6465D', width: 36, height: 36 }}>
-                  <Person sx={{ fontSize: 18 }} />
+                <Avatar sx={{ bgcolor: 'rgba(246, 70, 93, 0.1)', color: '#F6465D', width: { xs: 28, sm: 36 }, height: { xs: 28, sm: 36 }, flexShrink: 0 }}>
+                  <Person sx={{ fontSize: { xs: 15, sm: 18 } }} />
                 </Avatar>
               </Box>
-              <Box>
-                <Typography variant="h3" sx={{ fontWeight: 800, fontSize: '2.2rem', color: '#F6465D', lineHeight: 1 }}>
+              <Box sx={{ overflow: 'hidden' }}>
+                <Typography variant="h3" sx={{ fontWeight: 800, fontSize: { xs: '1.5rem', sm: '2.2rem' }, color: '#F6465D', lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {isFiltered ? visibleStats.filter((c: CustomerStat) => c.pendingAmount > 0).length : customersWithDues}
                 </Typography>
-                <Typography variant="body2" sx={{ color: '#848E9C', mt: 0.5 }}>
+                <Typography variant="body2" sx={{ color: '#848E9C', mt: 0.5, fontSize: { xs: '0.7rem', sm: '0.875rem' } }}>
                   of {totalCustomers} customers
                 </Typography>
               </Box>
@@ -330,29 +330,29 @@ const CustomerList: React.FC = () => {
           </Card>
 
           {/* Total Revenue Card */}
-          <Card sx={{ 
-            height: '140px',
-            borderRadius: 2, 
+          <Card sx={{
+            height: { xs: '124px', sm: '140px' },
+            borderRadius: 2,
             background: '#161A1E',
             borderTop: '3px solid #0ECB81',
-            color: '#EAECEF', 
-            boxShadow: '0 4px 12px rgba(0,0,0,0.2)', 
-            transition: 'transform 0.3s, box-shadow 0.3s', 
+            color: '#EAECEF',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            transition: 'transform 0.3s, box-shadow 0.3s',
             '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 8px 24px rgba(14, 203, 129, 0.15)' },
             display: 'flex',
             flexDirection: 'column'
           }}>
-            <CardContent sx={{ p: 2, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#848E9C', lineHeight: 1.2 }}>
+            <CardContent sx={{ p: { xs: 1.5, sm: 2 }, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minWidth: 0 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1, gap: 0.5 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#848E9C', lineHeight: 1.2, fontSize: { xs: '0.75rem', sm: '1rem' } }}>
                   Total Revenue
                 </Typography>
-                <Avatar sx={{ bgcolor: 'rgba(14, 203, 129, 0.1)', color: '#0ECB81', width: 36, height: 36 }}>
-                  <AccountBalanceWallet sx={{ fontSize: 18 }} />
+                <Avatar sx={{ bgcolor: 'rgba(14, 203, 129, 0.1)', color: '#0ECB81', width: { xs: 28, sm: 36 }, height: { xs: 28, sm: 36 }, flexShrink: 0 }}>
+                  <AccountBalanceWallet sx={{ fontSize: { xs: 15, sm: 18 } }} />
                 </Avatar>
               </Box>
-              <Box>
-                <Typography variant="h3" sx={{ fontWeight: 800, fontSize: '2rem', color: '#EAECEF', lineHeight: 1 }}>
+              <Box sx={{ overflow: 'hidden' }}>
+                <Typography variant="h3" sx={{ fontWeight: 800, fontSize: { xs: '1.15rem', sm: '2rem' }, color: '#EAECEF', lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   ₹{(isFiltered ? visibleStats.reduce((s: number, c: CustomerStat) => s + c.totalAmount, 0) : totalRevenue).toFixed(2)}
                 </Typography>
               </Box>
@@ -360,29 +360,29 @@ const CustomerList: React.FC = () => {
           </Card>
 
           {/* Pending Payments Card */}
-          <Card sx={{ 
-            height: '140px',
-            borderRadius: 2, 
+          <Card sx={{
+            height: { xs: '124px', sm: '140px' },
+            borderRadius: 2,
             background: '#161A1E',
             borderTop: '3px solid #F6465D',
-            color: '#EAECEF', 
-            boxShadow: '0 4px 12px rgba(0,0,0,0.2)', 
-            transition: 'transform 0.3s, box-shadow 0.3s', 
+            color: '#EAECEF',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            transition: 'transform 0.3s, box-shadow 0.3s',
             '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 8px 24px rgba(246, 70, 93, 0.15)' },
             display: 'flex',
             flexDirection: 'column'
           }}>
-            <CardContent sx={{ p: 2, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#848E9C', lineHeight: 1.2 }}>
+            <CardContent sx={{ p: { xs: 1.5, sm: 2 }, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minWidth: 0 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1, gap: 0.5 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, color: '#848E9C', lineHeight: 1.2, fontSize: { xs: '0.75rem', sm: '1rem' } }}>
                   Pending Payments
                 </Typography>
-                <Avatar sx={{ bgcolor: 'rgba(246, 70, 93, 0.1)', color: '#F6465D', width: 36, height: 36 }}>
-                  <AccountBalanceWallet sx={{ fontSize: 18 }} />
+                <Avatar sx={{ bgcolor: 'rgba(246, 70, 93, 0.1)', color: '#F6465D', width: { xs: 28, sm: 36 }, height: { xs: 28, sm: 36 }, flexShrink: 0 }}>
+                  <AccountBalanceWallet sx={{ fontSize: { xs: 15, sm: 18 } }} />
                 </Avatar>
               </Box>
-              <Box>
-                <Typography variant="h3" sx={{ fontWeight: 800, fontSize: '2rem', color: '#EAECEF', lineHeight: 1 }}>
+              <Box sx={{ overflow: 'hidden' }}>
+                <Typography variant="h3" sx={{ fontWeight: 800, fontSize: { xs: '1.15rem', sm: '2rem' }, color: '#EAECEF', lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   ₹{(isFiltered ? visibleStats.reduce((s: number, c: CustomerStat) => s + c.pendingAmount, 0) : pendingRevenue).toFixed(2)}
                 </Typography>
               </Box>
