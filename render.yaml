@@ -15,10 +15,15 @@ services:
     plan: starter
     autoDeploy: false
     buildCommand: npm ci && npx prisma generate && npm run build && npm run build:backend
-    # `prisma migrate deploy` only applies pending migrations (no-ops if the schema is already
-    # current) — safe to run on every boot, and this is what keeps a fresh deploy from ever
-    # serving traffic against a schema it doesn't match.
-    startCommand: npx prisma migrate deploy && node backend/dist/index.js
+    # Deliberately does NOT run `prisma migrate deploy` here. Supabase's Supavisor pooler doesn't
+    # support the session-level advisory lock Prisma's migration engine needs, so `migrate deploy`
+    # (like `migrate dev`/`migrate status` before it) hangs indefinitely rather than erroring —
+    # this took down every earlier deploy attempt with "no open ports detected", since the server
+    # itself never got a chance to start and bind a port. Migrations are instead generated offline
+    # (`prisma migrate diff --from-empty --to-schema ... --script`) and applied by hand against
+    # DIRECT_URL — see prisma/migrations/ — so by the time a new migration ships, it's already
+    # applied to the database before this ever redeploys.
+    startCommand: node backend/dist/index.js
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
