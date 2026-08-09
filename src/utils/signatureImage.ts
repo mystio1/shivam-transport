@@ -6,23 +6,22 @@
 // instead asks, per pixel, "is this darker than what's typical for *this neighbourhood*?" — so
 // an unevenly-lit photo still gets a clean cutout, computed via an integral image so it stays
 // fast regardless of window size.
+import { encodeWithBudget, fileToImage, supportsWebpEncoding } from './imageEncoding';
 
-const MAX_WIDTH = 900;
-const MAX_HEIGHT = 400;
+// Same idea as a government portal's "signature must be under 50KB, ~140x60px" upload rule —
+// except this auto-fits the image to the limit instead of just rejecting an oversized file and
+// making the admin go find their own compression tool. A signature only ever prints at roughly
+// 1.5-2 inches wide on a bill; at 300 DPI that's 450-600px, so 640x260 has real headroom for
+// print sharpness while still being a fraction of a typical phone photo's resolution (and this
+// image gets stored as base64 text directly in the database — see the branding schema comments
+// for why keeping this small matters for a free-tier Postgres budget).
+const MAX_WIDTH = 640;
+const MAX_HEIGHT = 260;
 
-function fileToImage(file: File): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error('Could not read that image file'));
-      img.src = reader.result as string;
-    };
-    reader.onerror = () => reject(new Error('Could not read that file'));
-    reader.readAsDataURL(file);
-  });
-}
+// Target ceiling for the final encoded size. Chosen generously above the ~20-50KB governments
+// commonly cap signature uploads at, since this is being auto-fit rather than hand-tuned by
+// whoever's uploading it.
+const TARGET_MAX_BYTES = 60 * 1024;
 
 function drawToCanvas(img: HTMLImageElement): CanvasRenderingContext2D {
   const scale = Math.min(1, MAX_WIDTH / img.width, MAX_HEIGHT / img.height);
@@ -74,11 +73,13 @@ function cropToContent(ctx: CanvasRenderingContext2D, padding = 14): CanvasRende
   return croppedCtx;
 }
 
-// Photo mode — just resized/compressed, no pixel changes.
+// Photo mode — just resized/compressed, no pixel changes. JPEG instead of PNG: this mode never
+// touches transparency (no background removal happens here), so there's no alpha channel to lose,
+// and JPEG's real lossy compression runs 5-10x smaller than lossless PNG on a photographic image.
 export async function processSignaturePhoto(file: File): Promise<string> {
   const img = await fileToImage(file);
   const ctx = drawToCanvas(img);
-  return ctx.canvas.toDataURL('image/png');
+  return encodeWithBudget(ctx.canvas, 'image/jpeg', TARGET_MAX_BYTES);
 }
 
 // Scan mode — Sauvola local adaptive threshold: each pixel is compared against the mean and
@@ -161,5 +162,9 @@ export async function processSignatureScan(file: File): Promise<string> {
 
   ctx.putImageData(imageData, 0, 0);
   const finalCtx = cropToContent(ctx);
-  return finalCtx.canvas.toDataURL('image/png');
+  // This mode's output is mostly flat transparent/ink regions, which PNG already compresses
+  // reasonably well — but WebP (when the browser actually supports encoding it) still does
+  // meaningfully better while keeping the alpha channel this mode depends on.
+  const mimeType = supportsWebpEncoding() ? 'image/webp' : 'image/png';
+  return encodeWithBudget(finalCtx.canvas, mimeType, TARGET_MAX_BYTES);
 }

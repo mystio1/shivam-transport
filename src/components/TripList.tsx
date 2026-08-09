@@ -22,6 +22,7 @@ import {
   GridLegacy as Grid,
   InputAdornment,
   Alert,
+  useTheme,
 } from '@mui/material';
 import {
   CalendarMonth,
@@ -34,6 +35,7 @@ import {
 } from '@mui/icons-material';
 import type { Trip } from '../types';
 import { useAppContext } from '../context/AppContext';
+import LoadingOverlay from './LoadingOverlay';
 
 interface TripListProps {
   trips: Trip[];
@@ -55,6 +57,7 @@ type EditForm = {
 };
 
 const TripList = ({ trips, customerName, customerAdvanceBalance = 0, onUpdatePaymentStatus, onDownloadTripBill }: TripListProps) => {
+  const theme = useTheme();
   const { updateTrip, recordTripPayment } = useAppContext();
 
   const [editTrip, setEditTrip] = useState<Trip | null>(null);
@@ -65,9 +68,11 @@ const TripList = ({ trips, customerName, customerAdvanceBalance = 0, onUpdatePay
   const [paymentAmount, setPaymentAmount] = useState('');
   const [fullyPaid, setFullyPaid] = useState(false);
   const [fromAdvance, setFromAdvance] = useState(false);
+  const [paymentNote, setPaymentNote] = useState('');
   const [savingPayment, setSavingPayment] = useState(false);
   const [paymentError, setPaymentError] = useState('');
   const [confirmUnpaidTrip, setConfirmUnpaidTrip] = useState<Trip | null>(null);
+  const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
 
   const sortedTrips = [...trips].sort(
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
@@ -83,6 +88,7 @@ const TripList = ({ trips, customerName, customerAdvanceBalance = 0, onUpdatePay
     setPaymentAmount(remaining > 0 ? remaining.toFixed(2) : '');
     setFullyPaid(false);
     setFromAdvance(false);
+    setPaymentNote('');
     setPaymentError('');
   };
 
@@ -115,7 +121,7 @@ const TripList = ({ trips, customerName, customerAdvanceBalance = 0, onUpdatePay
     setSavingPayment(true);
     setPaymentError('');
     try {
-      await recordTripPayment(paymentTrip.id, { amount, fullyPaid, fromAdvance });
+      await recordTripPayment(paymentTrip.id, { amount, fullyPaid, fromAdvance, note: paymentNote.trim() });
       setPaymentTrip(null);
     } catch (error) {
       setPaymentError(error instanceof Error ? error.message : 'Could not record payment');
@@ -168,11 +174,11 @@ const TripList = ({ trips, customerName, customerAdvanceBalance = 0, onUpdatePay
       sx={{
         p: { xs: 2, sm: 4 },
         borderRadius: 2,
-        background: '#161A1E',
-        border: '1px solid #2B3139',
+        background: theme.palette.background.paper,
+        border: `1px solid ${theme.palette.divider}`,
       }}
     >
-      <Typography variant="h5" gutterBottom sx={{ fontWeight: 700, mb: 3, color: '#EAECEF' }}>
+      <Typography variant="h5" gutterBottom sx={{ fontWeight: 700, mb: 3, color: 'text.primary' }}>
         Trip History
       </Typography>
       {sortedTrips.length === 0 ? (
@@ -181,13 +187,13 @@ const TripList = ({ trips, customerName, customerAdvanceBalance = 0, onUpdatePay
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          color: '#848E9C',
+          color: 'text.secondary',
           borderRadius: 2,
-          bgcolor: '#1E2329',
-          border: '1px dashed #2B3139'
+          bgcolor: 'action.hover',
+          border: `1px dashed ${theme.palette.divider}`
         }}>
-          <CalendarMonth sx={{ fontSize: 48, color: '#848E9C', mb: 2 }} />
-          <Typography variant="body1" sx={{ textAlign: 'center', mb: 1, fontWeight: 600, letterSpacing: '0.1px', color: '#EAECEF' }}>
+          <CalendarMonth sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+          <Typography variant="body1" sx={{ textAlign: 'center', mb: 1, fontWeight: 600, letterSpacing: '0.1px', color: 'text.primary' }}>
             No trips recorded yet for {customerName}.
           </Typography>
         </Box>
@@ -196,27 +202,29 @@ const TripList = ({ trips, customerName, customerAdvanceBalance = 0, onUpdatePay
           {sortedTrips.map((trip, index) => (
             <React.Fragment key={trip.id}>
               <ListItem
+                onClick={() => setSelectedTrip(trip)}
                 sx={{
                   mb: 1.5,
                   py: 2,
                   px: { xs: 2, sm: 3 },
                   borderRadius: 2,
-                  bgcolor: index % 2 === 0 ? '#1E2329' : '#161A1E',
-                  border: '1px solid #2B3139',
-                  '&:hover': { bgcolor: '#2B3139' },
+                  bgcolor: index % 2 === 0 ? 'action.hover' : 'background.paper',
+                  border: `1px solid ${theme.palette.divider}`,
+                  cursor: 'pointer',
+                  '&:hover': { bgcolor: 'divider' },
                   transition: 'background-color 0.2s ease-in-out'
                 }}
                 secondaryAction={
-                  <Box sx={{ display: 'flex', gap: 0.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }} onClick={e => e.stopPropagation()}>
                     {onDownloadTripBill && (
                       <Tooltip title="Download bill for this trip">
-                        <IconButton edge="end" onClick={() => onDownloadTripBill(trip)} sx={{ color: '#848E9C', '&:hover': { color: '#F0B90B' } }}>
+                        <IconButton edge="end" onClick={() => onDownloadTripBill(trip)} sx={{ color: 'text.secondary', '&:hover': { color: '#F0B90B' } }}>
                           <Download fontSize="small" />
                         </IconButton>
                       </Tooltip>
                     )}
                     <Tooltip title="Edit trip">
-                      <IconButton edge="end" onClick={() => openEditTrip(trip)} sx={{ color: '#848E9C', '&:hover': { color: '#F0B90B' } }}>
+                      <IconButton edge="end" onClick={() => openEditTrip(trip)} sx={{ color: 'text.secondary', '&:hover': { color: '#F0B90B' } }}>
                         <Edit fontSize="small" />
                       </IconButton>
                     </Tooltip>
@@ -252,8 +260,8 @@ const TripList = ({ trips, customerName, customerAdvanceBalance = 0, onUpdatePay
                   primary={
                     <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'center' }, gap: { xs: 0.5, sm: 0 }, mb: 1 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <CalendarMonth sx={{ mr: 1, color: '#848E9C', fontSize: 18 }} />
-                        <Typography variant="body2" sx={{ fontWeight: 600, letterSpacing: '0.2px', color: '#EAECEF' }}>
+                        <CalendarMonth sx={{ mr: 1, color: 'text.secondary', fontSize: 18 }} />
+                        <Typography variant="body2" sx={{ fontWeight: 600, letterSpacing: '0.2px', color: 'text.primary' }}>
                           {new Date(trip.date).toLocaleDateString('en-US', {
                             year: 'numeric',
                             month: 'short',
@@ -268,7 +276,7 @@ const TripList = ({ trips, customerName, customerAdvanceBalance = 0, onUpdatePay
                             fontWeight: 800,
                             mr: 1.5,
                             letterSpacing: '0.2px',
-                            color: '#EAECEF'
+                            color: 'text.primary'
                           }}
                         >
                           ₹{typeof trip.amount === 'number' ? trip.amount.toFixed(2) : '0.00'}
@@ -288,9 +296,9 @@ const TripList = ({ trips, customerName, customerAdvanceBalance = 0, onUpdatePay
                   }
                   secondary={
                     <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
-                      <LocationOn sx={{ mr: 1, color: '#848E9C', fontSize: 18, mt: '2px' }} />
+                      <LocationOn sx={{ mr: 1, color: 'text.secondary', fontSize: 18, mt: '2px' }} />
                       <Box>
-                        <Typography variant="body2" sx={{ color: '#848E9C', fontWeight: 500, letterSpacing: '0.1px' }}>
+                        <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 500, letterSpacing: '0.1px' }}>
                           {trip.pickupLocation} → {trip.dropLocation}
                         </Typography>
                         {trip.driverName && (
@@ -302,11 +310,16 @@ const TripList = ({ trips, customerName, customerAdvanceBalance = 0, onUpdatePay
                           </Box>
                         )}
                         {(typeof trip.advanceAmount === 'number' && trip.advanceAmount > 0) || (trip.isPaid && (trip.paidAmount || 0) < trip.amount) ? (
-                          <Typography variant="body2" sx={{ color: '#848E9C', fontWeight: 500, letterSpacing: '0.1px', mt: 0.5, fontSize: '0.8rem' }}>
+                          <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 500, letterSpacing: '0.1px', mt: 0.5, fontSize: '0.8rem' }}>
                             {trip.advanceAmount ? `Advance: ₹${trip.advanceAmount.toFixed(2)}` : ''}
                             {trip.paidAmount ? `${trip.advanceAmount ? '  ·  ' : ''}Paid so far: ₹${trip.paidAmount.toFixed(2)}` : ''}
                           </Typography>
                         ) : null}
+                        {trip.paymentNote && (
+                          <Typography variant="body2" sx={{ color: 'text.secondary', fontStyle: 'italic', mt: 0.5, fontSize: '0.8rem' }}>
+                            Note: {trip.paymentNote}
+                          </Typography>
+                        )}
                       </Box>
                     </Box>
                   }
@@ -318,7 +331,14 @@ const TripList = ({ trips, customerName, customerAdvanceBalance = 0, onUpdatePay
       )}
 
       {/* Edit Trip Dialog */}
-      <Dialog open={Boolean(editTrip)} onClose={() => setEditTrip(null)} maxWidth="sm" fullWidth>
+      <Dialog
+        open={Boolean(editTrip)}
+        onClose={() => setEditTrip(null)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{ sx: { position: 'relative', overflow: 'hidden' } }}
+      >
+        <LoadingOverlay open={savingEdit} absolute label="Saving trip…" />
         <DialogTitle>Edit Trip</DialogTitle>
         <DialogContent>
           {editForm && (
@@ -373,20 +393,27 @@ const TripList = ({ trips, customerName, customerAdvanceBalance = 0, onUpdatePay
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setEditTrip(null)}>Cancel</Button>
-          <Button onClick={handleSaveEdit} variant="contained" disabled={savingEdit} sx={{ color: '#0B0E11', fontWeight: 700 }}>
+          <Button onClick={handleSaveEdit} variant="contained" disabled={savingEdit} sx={{ color: 'primary.contrastText', fontWeight: 700 }}>
             {savingEdit ? 'Saving...' : 'Save Changes'}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Record Payment Dialog */}
-      <Dialog open={Boolean(paymentTrip)} onClose={() => setPaymentTrip(null)} maxWidth="xs" fullWidth>
+      <Dialog
+        open={Boolean(paymentTrip)}
+        onClose={() => setPaymentTrip(null)}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{ sx: { position: 'relative', overflow: 'hidden' } }}
+      >
+        <LoadingOverlay open={savingPayment} absolute label="Recording payment…" />
         <DialogTitle>Record Payment</DialogTitle>
         <DialogContent>
           {paymentTrip && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 0.5 }}>
               {paymentError && <Alert severity="error">{paymentError}</Alert>}
-              <Typography variant="body2" sx={{ color: '#848E9C' }}>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                 Trip amount: ₹{Number(paymentTrip.amount || 0).toFixed(2)}
                 {Number(paymentTrip.paidAmount) > 0 && ` · Already paid: ₹${Number(paymentTrip.paidAmount).toFixed(2)}`}
                 {` · Remaining: ₹${remainingForPaymentTrip.toFixed(2)}`}
@@ -410,14 +437,137 @@ const TripList = ({ trips, customerName, customerAdvanceBalance = 0, onUpdatePay
                   label={`Pay from advance balance (₹${customerAdvanceBalance.toFixed(2)} available)`}
                 />
               )}
+              <TextField
+                label="Note (optional)"
+                placeholder="e.g. Cash handed to driver, UPI to personal account..."
+                value={paymentNote}
+                onChange={e => setPaymentNote(e.target.value)}
+                fullWidth
+                multiline
+                rows={2}
+              />
             </Box>
           )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setPaymentTrip(null)}>Cancel</Button>
-          <Button onClick={handleConfirmPayment} variant="contained" disabled={savingPayment} sx={{ color: '#0B0E11', fontWeight: 700 }}>
+          <Button onClick={handleConfirmPayment} variant="contained" disabled={savingPayment} sx={{ color: 'primary.contrastText', fontWeight: 700 }}>
             {savingPayment ? 'Saving...' : 'Confirm Payment'}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Trip Details — full record behind each trip row: material, vehicle, payment breakdown, status */}
+      <Dialog open={Boolean(selectedTrip)} onClose={() => setSelectedTrip(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Trip Details</DialogTitle>
+        <DialogContent>
+          {selectedTrip && (
+            <Grid container spacing={2} sx={{ mt: 0.5 }}>
+              <Grid item xs={12} sm={6}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>Date</Typography>
+                <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                  {new Date(selectedTrip.date).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: '2-digit' })}
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>Status</Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Chip
+                    label={selectedTrip.status === 'pending' ? 'Awaiting Approval' : selectedTrip.status === 'rejected' ? 'Rejected' : 'Approved'}
+                    size="small"
+                    sx={{
+                      fontWeight: 700,
+                      backgroundColor: selectedTrip.status === 'rejected' ? 'rgba(246, 70, 93, 0.1)' : selectedTrip.status === 'pending' ? 'rgba(240, 185, 11, 0.1)' : 'rgba(14, 203, 129, 0.1)',
+                      color: selectedTrip.status === 'rejected' ? '#F6465D' : selectedTrip.status === 'pending' ? '#F0B90B' : '#0ECB81',
+                    }}
+                  />
+                  <Chip
+                    icon={selectedTrip.isPaid ? <CheckCircle /> : <Cancel />}
+                    label={selectedTrip.isPaid ? 'Paid' : 'Unpaid'}
+                    size="small"
+                    sx={{
+                      fontWeight: 700,
+                      backgroundColor: selectedTrip.isPaid ? 'rgba(14, 203, 129, 0.1)' : 'rgba(246, 70, 93, 0.1)',
+                      color: selectedTrip.isPaid ? '#0ECB81' : '#F6465D',
+                    }}
+                  />
+                </Box>
+              </Grid>
+              {selectedTrip.status === 'rejected' && selectedTrip.rejectionReason && (
+                <Grid item xs={12}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>Rejection Reason</Typography>
+                  <Typography variant="body1" sx={{ color: '#F6465D' }}>{selectedTrip.rejectionReason}</Typography>
+                </Grid>
+              )}
+              <Grid item xs={12} sm={6}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>Pickup</Typography>
+                <Typography variant="body1">{selectedTrip.pickupLocation || '—'}</Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>Drop</Typography>
+                <Typography variant="body1">{selectedTrip.dropLocation || '—'}</Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>Vehicle Type</Typography>
+                <Typography variant="body1">{selectedTrip.vehicleType || '—'}</Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>Vehicle Number</Typography>
+                <Typography variant="body1">{selectedTrip.vehicleNumber || '—'}</Typography>
+              </Grid>
+              <Grid item xs={12}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>Material</Typography>
+                <Typography variant="body1">{selectedTrip.materialType || 'Not specified'}</Typography>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>Amount</Typography>
+                <Typography variant="body1" sx={{ fontWeight: 700 }}>₹{Number(selectedTrip.amount || 0).toFixed(2)}</Typography>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>Advance (at booking)</Typography>
+                <Typography variant="body1">₹{Number(selectedTrip.advanceAmount || 0).toFixed(2)}</Typography>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>Paid So Far</Typography>
+                <Typography variant="body1" sx={{ color: '#0ECB81', fontWeight: 700 }}>₹{Number(selectedTrip.paidAmount || 0).toFixed(2)}</Typography>
+              </Grid>
+              {selectedTrip.paymentMode && (
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>Payment Mode</Typography>
+                  <Typography variant="body1" sx={{ textTransform: 'capitalize' }}>{selectedTrip.paymentMode.replace('_', ' ')}</Typography>
+                </Grid>
+              )}
+              {selectedTrip.paymentNote && (
+                <Grid item xs={12}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>Payment Note</Typography>
+                  <Typography variant="body1">{selectedTrip.paymentNote}</Typography>
+                </Grid>
+              )}
+              {selectedTrip.driverName && (
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>Driver</Typography>
+                  <Typography variant="body1">
+                    {selectedTrip.driverName}{selectedTrip.driverCode ? ` (${selectedTrip.driverCode})` : ''}
+                  </Typography>
+                </Grid>
+              )}
+              {selectedTrip.submittedAt && (
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>Submitted</Typography>
+                  <Typography variant="body2">{new Date(selectedTrip.submittedAt).toLocaleString('en-IN')}</Typography>
+                </Grid>
+              )}
+              {selectedTrip.approvedAt && (
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>Approved</Typography>
+                  <Typography variant="body2">{new Date(selectedTrip.approvedAt).toLocaleString('en-IN')}</Typography>
+                </Grid>
+              )}
+            </Grid>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSelectedTrip(null)}>Close</Button>
         </DialogActions>
       </Dialog>
 
@@ -425,7 +575,7 @@ const TripList = ({ trips, customerName, customerAdvanceBalance = 0, onUpdatePay
       <Dialog open={Boolean(confirmUnpaidTrip)} onClose={() => setConfirmUnpaidTrip(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Change Payment Status?</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" sx={{ color: '#848E9C' }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
             Are you sure you want to change this trip's payment status from Paid to Unpaid?
           </Typography>
         </DialogContent>

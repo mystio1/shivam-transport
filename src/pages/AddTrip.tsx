@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Box, Typography, Paper, Autocomplete, TextField, Button, Dialog, DialogTitle,
-  DialogContent, DialogActions, Alert,
+  DialogContent, DialogActions, Alert, useTheme,
 } from '@mui/material';
 import { PersonAdd } from '@mui/icons-material';
 import { useSearchParams } from 'react-router-dom';
@@ -12,6 +12,7 @@ import type { Customer } from '../types';
 const EMPTY_NEW_CUSTOMER = { name: '', phone: '', address: '', email: '', gstNumber: '' };
 
 const AddTrip = () => {
+  const theme = useTheme();
   const { customers, addCustomer } = useAppContext();
   const [searchParams] = useSearchParams();
   const preselectId = searchParams.get('customerId');
@@ -53,15 +54,15 @@ const AddTrip = () => {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       <Box>
-        <Typography variant="h5" component="h1" sx={{ fontWeight: 700, color: '#EAECEF' }}>
+        <Typography variant="h5" component="h1" sx={{ fontWeight: 700, color: 'text.primary' }}>
           Add Trip
         </Typography>
-        <Typography variant="body2" sx={{ color: '#848E9C', mt: 0.5 }}>
+        <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
           Pick a customer, then fill in the trip details. This adds the trip already approved.
         </Typography>
       </Box>
 
-      <Paper elevation={0} sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, background: '#161A1E', border: '1px solid #2B3139' }}>
+      <Paper elevation={0} sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}` }}>
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <Autocomplete
             options={customers}
@@ -86,8 +87,8 @@ const AddTrip = () => {
       {selectedCustomer ? (
         <TripForm customerId={selectedCustomer.id} onTripAdded={() => {}} />
       ) : (
-        <Paper elevation={0} sx={{ p: 4, borderRadius: 2, background: '#161A1E', border: '1px dashed #2B3139', textAlign: 'center' }}>
-          <Typography sx={{ color: '#848E9C' }}>Select or create a customer above to add a trip for them.</Typography>
+        <Paper elevation={0} sx={{ p: 4, borderRadius: 2, background: theme.palette.background.paper, border: `1px dashed ${theme.palette.divider}`, textAlign: 'center' }}>
+          <Typography sx={{ color: 'text.secondary' }}>Select or create a customer above to add a trip for them.</Typography>
         </Paper>
       )}
 
@@ -134,7 +135,7 @@ const AddTrip = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setIsNewCustomerOpen(false)}>Cancel</Button>
-          <Button onClick={handleCreateCustomer} variant="contained" disabled={savingCustomer} sx={{ color: '#0B0E11', fontWeight: 700 }}>
+          <Button onClick={handleCreateCustomer} variant="contained" disabled={savingCustomer} sx={{ color: 'primary.contrastText', fontWeight: 700 }}>
             {savingCustomer ? 'Creating...' : 'Create & Select'}
           </Button>
         </DialogActions>

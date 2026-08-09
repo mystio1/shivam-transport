@@ -1,0 +1,39 @@
+# Render Blueprint — see https://render.com/docs/blueprint-spec
+#
+# No managed Postgres resource here: the database is Supabase, not Render's own Postgres addon
+# (see prisma/schema.prisma's datasource comment), so DATABASE_URL/DIRECT_URL are plain secrets
+# set by hand in the Render dashboard (`sync: false` below) rather than auto-wired from a
+# render.yaml-provisioned database.
+#
+# autoDeploy is deliberately false — the only thing allowed to trigger a deploy is
+# .github/workflows/ci.yml's `deploy` job, which only runs after lint/build/test all pass. A
+# broken build can reach Render's dashboard (as a manual-deploy option) but never production.
+services:
+  - type: web
+    name: shivam-transport
+    runtime: node
+    plan: starter
+    autoDeploy: false
+    buildCommand: npm ci && npx prisma generate && npm run build && npm run build:backend
+    # `prisma migrate deploy` only applies pending migrations (no-ops if the schema is already
+    # current) — safe to run on every boot, and this is what keeps a fresh deploy from ever
+    # serving traffic against a schema it doesn't match.
+    startCommand: npx prisma migrate deploy && node backend/dist/index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      # Master password for the cross-tenant /support console (see backend/src/routes/support.routes.ts).
+      # Leaving this unset in the Render dashboard disables the feature entirely.
+      - key: SUPPORT_ACCESS_PASSWORD
+        sync: false

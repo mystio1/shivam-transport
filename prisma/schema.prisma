@@ -1,0 +1,368 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Prisma 7 moved connection strings out of schema.prisma and into prisma.config.ts (see that
+// file at the project root). Supabase (and any PgBouncer-fronted Postgres) needs two connection
+// strings — a POOLED one (DATABASE_URL, port 6543, transaction mode) for normal app traffic, and
+// a DIRECT one (DIRECT_URL, port 5432) for `prisma migrate`/`prisma db push`, since PgBouncer's
+// transaction-mode pooling doesn't support the session-level advisory locks the migration engine
+// needs. Both are wired up in prisma.config.ts. See .env.example for where to find them.
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  admin
+  driver
+}
+
+enum TripStatus {
+  pending
+  approved
+  rejected
+}
+
+enum TripEditRequestStatus {
+  pending
+  resolved
+  dismissed
+}
+
+model Group {
+  id                String        @id @default(cuid())
+  code              String        @unique @db.VarChar(12)
+  name              String
+  nextInvoiceNumber Int           @default(1)
+  frozen            Boolean       @default(false)
+  // Support-console-managed usage caps — null means unlimited (the default for every existing
+  // and newly-created group until support deliberately sets a cap). Enforced at driver/admin
+  // signup and at bill creation respectively; see routes/auth.routes.ts and routes/bills.routes.ts.
+  maxDrivers        Int?
+  maxAdmins         Int?
+  maxBillsPerDay    Int?
+  createdAt         DateTime      @default(now())
+
+  branding          Branding?
+  bankAccounts      BankAccount[]
+  users             User[]
+  customers         Customer[]
+  trips             Trip[]
+  bills             Bill[]
+  advanceEntries    AdvanceEntry[]
+  auditLogs         AuditLog[]
+  vehicles          Vehicle[]
+  tripEditRequests  TripEditRequest[]
+}
+
+model Branding {
+  id                String  @id @default(cuid())
+  groupId           String  @unique
+  group             Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  companyName       String  @default("Shivam Transport")
+  tagline           String  @default("Transport & Logistics Solutions")
+  proprietorName    String  @default("")
+  phone1            String  @default("")
+  phone2            String  @default("")
+  address           String  @default("")
+  gstNumber         String  @default("")
+  footerNote        String  @default("Thank you for your business!")
+  primaryColor      String  @default("#0B2B5E")
+  accentColor       String  @default("#F0B90B")
+  logoDataUrl       String? @db.Text
+  signatureDataUrl  String? @db.Text
+  // Flank the company name on printed bills — see src/utils/headerImage.ts on the frontend for
+  // the shared fixed aspect ratio both slots are cropped to.
+  headerLeftImageDataUrl  String? @db.Text
+  headerRightImageDataUrl String? @db.Text
+  // UPI/payment scanner shown next to "Amount in Words" below Net Payable on the printed bill.
+  upiQrImageDataUrl String? @db.Text
+  upiQrShowOn       String  @default("both") // 'both' | 'gst' | 'non-gst'
+  bankName          String  @default("")
+  bankBranch        String  @default("")
+  bankAccountNumber String  @default("")
+  bankIfsc          String  @default("")
+  publicServerUrl   String  @default("")
+}
+
+model BankAccount {
+  id            String  @id @default(cuid())
+  groupId       String
+  group         Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  label         String  @default("")
+  bankName      String  @default("")
+  bankBranch    String  @default("")
+  accountNumber String  @default("")
+  ifscCode      String  @default("")
+  sortOrder     Int     @default(0)
+
+  @@index([groupId])
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  groupId            String
+  group              Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  role               Role
+  name               String
+  phone              String
+  userCode           String?   @unique
+  passwordHash       String
+  email              String?
+  active             Boolean   @default(true)
+  resetOtpHash       String?
+  resetOtpExpiresAt  DateTime?
+  resetOtpAttempts   Int       @default(0)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  driverTrips        Trip[]      @relation("DriverUser")
+  approvedTrips      Trip[]      @relation("ApprovedByUser")
+  auditLogs          AuditLog[]
+  sessions           Session[]
+  tripEditRequests   TripEditRequest[]
+
+  @@unique([groupId, phone])
+  @@index([groupId])
+}
+
+model Session {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastSeenAt DateTime  @default(now())
+  userAgent  String?
+  ip         String?
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Customer {
+  id             String         @id @default(cuid())
+  groupId        String
+  group          Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name           String
+  phone          String         @default("")
+  address        String         @default("")
+  email          String         @default("")
+  gstNumber      String         @default("")
+  advanceBalance Decimal        @default(0) @db.Decimal(12, 2)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  trips          Trip[]
+  bills          Bill[]
+  advanceEntries AdvanceEntry[]
+
+  // Exact-match guard against the findOrCreateCustomer race (two concurrent trip submissions
+  // for a brand-new customer name creating duplicates) — the app's actual matching is
+  // case-insensitive, so this constraint narrows rather than eliminates the race; see
+  // customers.repository.ts's findOrCreate for the create-then-catch-P2002-then-refetch pattern
+  // that relies on it.
+  @@unique([groupId, name])
+  @@index([groupId])
+  @@index([groupId, name])
+}
+
+model AdvanceEntry {
+  id           String    @id @default(cuid())
+  customerId   String
+  customer     Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  groupId      String
+  group        Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  amount       Decimal   @db.Decimal(12, 2)
+  note         String    @default("")
+  date         DateTime
+  createdAt    DateTime  @default(now())
+  deleted      Boolean   @default(false)
+  deletedAt    DateTime?
+  usedInBillNo String?
+  usedInBillId String?
+  usedInBill   Bill?     @relation(fields: [usedInBillId], references: [id], onDelete: SetNull)
+
+  @@index([groupId])
+  @@index([customerId, deleted, date])
+}
+
+model Trip {
+  id              String     @id @default(cuid())
+  groupId         String
+  group           Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  customerId      String?
+  customer        Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName    String
+  customerPhone   String     @default("")
+  customerAddress String     @default("")
+  // Nullable — every trip created through the app has a real submitting user, but a restored
+  // backup (POST /api/restore) is importing another account's history into a group that never
+  // had that original driver as a member, so there's no live User row to point at.
+  driverId        String?
+  driver          User?      @relation("DriverUser", fields: [driverId], references: [id], onDelete: SetNull)
+  driverName      String
+  driverCode      String     @default("")
+  date            DateTime
+  pickupLocation  String
+  dropLocation    String
+  amount          Decimal    @db.Decimal(12, 2)
+  advanceAmount   Decimal    @default(0) @db.Decimal(12, 2)
+  isPaid          Boolean    @default(false)
+  paidAmount      Decimal    @default(0) @db.Decimal(12, 2)
+  paymentMode     String     @default("")
+  // Free-text note on how a payment was received (e.g. "Cash via driver") — set from the Record
+  // Payment dialog, shown back wherever the trip's payment is displayed.
+  paymentNote     String     @default("")
+  paidAt          DateTime?
+  vehicleType     String
+  vehicleNumber   String     @default("")
+  materialType    String     @default("")
+  status          TripStatus @default(pending)
+  rejectionReason String     @default("")
+  submittedAt     DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  approvedAt      DateTime?
+  approvedById    String?
+  approvedBy      User?      @relation("ApprovedByUser", fields: [approvedById], references: [id], onDelete: SetNull)
+  // Idempotency key for offline-queued driver submissions — see the offline-queue rebuild plan.
+  // Nullable + unique-per-group: Postgres treats multiple NULLs as non-conflicting, so
+  // admin-direct trip creation (which never sends this) is unaffected.
+  clientRequestId String?
+
+  billTripLines   BillTripLine[]
+  editRequests    TripEditRequest[]
+
+  @@index([groupId])
+  @@index([groupId, status])
+  @@index([customerId])
+  @@index([driverId])
+  @@unique([groupId, clientRequestId])
+}
+
+model Bill {
+  id              String        @id @default(cuid())
+  groupId         String
+  group           Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  customerId      String?
+  customer        Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customerName    String
+  billNo          String
+  billDate        DateTime
+  isGstBill       Boolean       @default(false)
+  gstPercent      Decimal       @default(0) @db.Decimal(5, 2)
+  discount        Decimal       @default(0) @db.Decimal(12, 2)
+  subTotal        Decimal       @default(0) @db.Decimal(12, 2)
+  received        Decimal       @default(0) @db.Decimal(12, 2)
+  gstAmount       Decimal       @default(0) @db.Decimal(12, 2)
+  grandTotal      Decimal       @default(0) @db.Decimal(12, 2)
+  advanceApplied  Decimal       @default(0) @db.Decimal(12, 2)
+  netPayable      Decimal       @default(0) @db.Decimal(12, 2)
+  amountInWords   String        @default("")
+  customerPhone   String        @default("")
+  customerAddress String        @default("")
+  customerGst     String        @default("")
+  bankName        String        @default("")
+  bankBranch      String        @default("")
+  accountNumber   String        @default("")
+  ifscCode        String        @default("")
+  createdAt       DateTime      @default(now())
+  createdBy       String
+  deleted         Boolean       @default(false)
+  deletedAt       DateTime?
+
+  tripLines       BillTripLine[]
+  advanceEntries  AdvanceEntry[]
+
+  @@index([groupId])
+  @@index([groupId, deleted])
+  @@index([customerId])
+}
+
+model BillTripLine {
+  id             String    @id @default(cuid())
+  billId         String
+  bill           Bill      @relation(fields: [billId], references: [id], onDelete: Cascade)
+  tripId         String?
+  trip           Trip?     @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  date           DateTime?
+  pickupLocation String    @default("")
+  dropLocation   String    @default("")
+  amount         Decimal   @default(0) @db.Decimal(12, 2)
+  paidAmount     Decimal   @default(0) @db.Decimal(12, 2)
+
+  @@index([billId])
+  @@index([tripId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  groupId   String
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userName  String
+  action    String
+  entityId  String
+  details   Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([groupId])
+  @@index([groupId, createdAt])
+  @@index([entityId])
+}
+
+model Vehicle {
+  id            String            @id @default(cuid())
+  groupId       String
+  group         Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  vehicleNumber String
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  documents     VehicleDocument[]
+
+  @@index([groupId])
+  @@unique([groupId, vehicleNumber])
+}
+
+// One expiry-tracked segment on a vehicle — Insurance and PUC are just the two suggested first;
+// `label` is free text so the admin can add any number of other segments (Fitness Certificate,
+// Permit, Road Tax, ...) the same way.
+model VehicleDocument {
+  id                 String   @id @default(cuid())
+  vehicleId          String
+  vehicle            Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  label              String
+  expiryDate         DateTime
+  reminderDaysBefore Int      @default(7)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([vehicleId])
+}
+
+// A driver's request to change something on a trip that's already been approved (and so can no
+// longer be edited directly — see trips.routes.ts's pending-only edit rule). An admin reviews
+// the message and either applies the change themself (via the normal trip PATCH route) or
+// dismisses the request.
+model TripEditRequest {
+  id         String                 @id @default(cuid())
+  groupId    String
+  group      Group                  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  tripId     String
+  trip       Trip                   @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  driverId   String
+  driver     User                   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  driverName String
+  message    String
+  status     TripEditRequestStatus  @default(pending)
+  createdAt  DateTime               @default(now())
+  resolvedAt DateTime?
+
+  @@index([groupId])
+  @@index([tripId])
+}

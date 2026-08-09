@@ -21,7 +21,10 @@ import {
   ArrowForward,
   CalendarMonth,
   ExpandMore,
+  QueryStats,
 } from '@mui/icons-material';
+import EmptyState from './EmptyState';
+import { StatCardsSkeleton, PanelSkeleton } from './Skeletons';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
   PieChart, Pie, Cell,
@@ -62,13 +65,17 @@ const DONUT_COLORS = ['#0ECB81', '#F6465D'];
 const Dashboard = () => {
   const theme = useTheme();
   const navigate = useNavigate();
-  const { customers, trips, getCustomerTrips, user } = useAppContext();
+  const { customers, trips, getCustomerTrips, user, isLoading } = useAppContext();
+  // Only the very first load (no cached data on screen yet) shows skeletons — a background
+  // refresh (e.g. triggered by another admin's edit via SSE) shouldn't flicker the whole
+  // dashboard back to a loading state when there's already something to show.
+  const showSkeleton = isLoading && customers.length === 0 && trips.length === 0;
 
   const today = useMemo(() => startOfDay(new Date()), []);
-  const [rangeFrom, setRangeFrom] = useState(() => addDays(today, -6));
+  const [rangeFrom, setRangeFrom] = useState(() => addDays(today, -29));
   const [rangeTo, setRangeTo] = useState(() => today);
   const [pickerAnchor, setPickerAnchor] = useState<HTMLElement | null>(null);
-  const [draftFrom, setDraftFrom] = useState(() => toInputValue(addDays(today, -6)));
+  const [draftFrom, setDraftFrom] = useState(() => toInputValue(addDays(today, -29)));
   const [draftTo, setDraftTo] = useState(() => toInputValue(today));
 
   const applyPreset = (days: number) => {
@@ -203,7 +210,10 @@ const Dashboard = () => {
     },
     {
       key: 'trips', label: 'Total Trips', value: totalTrips.toLocaleString('en-IN'), icon: <LocalShipping />,
-      color: '#848E9C', trendVal: tripsTrend, sparkline: tripsSparkline, onClick: () => navigate('/trips'),
+      color: '#848E9C', trendVal: tripsTrend, sparkline: tripsSparkline,
+      // Carries the Dashboard's own selected date range over to All Trips, so clicking through
+      // lands on the same filtered view instead of resetting to "show everything".
+      onClick: () => navigate('/trips', { state: { from: toInputValue(rangeFrom), to: toInputValue(rangeTo) } }),
     },
     {
       key: 'revenue', label: 'Total Revenue', value: `₹${totalRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`, icon: <AccountBalanceWallet />,
@@ -228,7 +238,7 @@ const Dashboard = () => {
         }}
       >
         <Box>
-          <Typography sx={{ color: '#848E9C', fontSize: 'clamp(0.8rem, 1vw, 0.95rem)', fontWeight: 600 }}>
+          <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(0.8rem, 1vw, 0.95rem)', fontWeight: 600 }}>
             {greeting}, {user?.name || 'there'} 👋
           </Typography>
           <Typography
@@ -243,7 +253,7 @@ const Dashboard = () => {
           >
             Business Overview
           </Typography>
-          <Typography sx={{ color: '#848E9C', fontSize: 'clamp(14px, 1vw, 16px)' }}>
+          <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(14px, 1vw, 16px)' }}>
             Here's what's happening with your business today.
           </Typography>
         </Box>
@@ -253,7 +263,7 @@ const Dashboard = () => {
           onClick={e => setPickerAnchor(e.currentTarget)}
           startIcon={<CalendarMonth />}
           endIcon={<ExpandMore />}
-          sx={{ borderColor: '#2B3139', color: '#EAECEF', fontWeight: 700, whiteSpace: 'nowrap' }}
+          sx={{ borderColor: 'divider', color: 'text.primary', fontWeight: 700, whiteSpace: 'nowrap' }}
         >
           {formatShort(rangeFrom, rangeFrom.getFullYear() !== rangeTo.getFullYear())} - {formatShort(rangeTo, rangeFrom.getFullYear() !== rangeTo.getFullYear())}
         </Button>
@@ -264,7 +274,7 @@ const Dashboard = () => {
           anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
           transformOrigin={{ vertical: 'top', horizontal: 'right' }}
         >
-          <Box sx={{ p: 2.5, bgcolor: '#161A1E', minWidth: 280 }}>
+          <Box sx={{ p: 2.5, bgcolor: 'background.paper', minWidth: 280 }}>
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2 }}>
               {[{ label: '7D', days: 7 }, { label: '30D', days: 30 }, { label: '90D', days: 90 }].map(preset => (
                 <Chip
@@ -275,7 +285,7 @@ const Dashboard = () => {
                 />
               ))}
             </Box>
-            <Typography sx={{ color: '#848E9C', fontSize: 12, fontWeight: 700, mb: 1 }}>
+            <Typography sx={{ color: 'text.secondary', fontSize: 12, fontWeight: 700, mb: 1 }}>
               Financial Year (31 Mar – 30 Mar)
             </Typography>
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2 }}>
@@ -299,7 +309,7 @@ const Dashboard = () => {
                 onChange={e => setDraftTo(e.target.value)}
                 InputLabelProps={{ shrink: true }}
               />
-              <Button variant="contained" onClick={applyCustomRange} sx={{ color: '#0B0E11', fontWeight: 700 }}>
+              <Button variant="contained" onClick={applyCustomRange} sx={{ color: 'primary.contrastText', fontWeight: 700 }}>
                 Apply
               </Button>
             </Box>
@@ -308,6 +318,7 @@ const Dashboard = () => {
       </Box>
 
       {/* KPI Cards */}
+      {showSkeleton ? <StatCardsSkeleton count={4} /> : (
       <Box
         sx={{
           display: 'grid',
@@ -327,9 +338,9 @@ const Dashboard = () => {
               height: '100%',
               minHeight: 0,
               borderRadius: { xs: 3, sm: 4 },
-              background: '#161A1E',
+              background: theme.palette.background.paper,
               borderTop: `3px solid ${card.color}`,
-              color: '#EAECEF',
+              color: 'text.primary',
               boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
               transition: 'transform 0.25s, box-shadow 0.25s',
               cursor: card.onClick ? 'pointer' : 'default',
@@ -338,7 +349,7 @@ const Dashboard = () => {
           >
             <CardContent sx={{ p: { xs: 1.5, sm: 2.25 }, '&:last-child': { pb: { xs: 1.5, sm: 2.25 } } }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1, gap: 0.5 }}>
-                <Typography sx={{ fontWeight: 600, color: '#848E9C', fontSize: 'clamp(11px, 1.1vw, 14px)' }}>
+                <Typography sx={{ fontWeight: 600, color: 'text.secondary', fontSize: 'clamp(11px, 1.1vw, 14px)' }}>
                   {card.label}
                 </Typography>
                 <Avatar sx={{ bgcolor: `${card.color}22`, color: card.color, width: { xs: 28, sm: 40 }, height: { xs: 28, sm: 40 }, flexShrink: 0 }}>
@@ -347,7 +358,7 @@ const Dashboard = () => {
               </Box>
               <Typography
                 sx={{
-                  fontWeight: 800, color: '#EAECEF', lineHeight: 1.1,
+                  fontWeight: 800, color: 'text.primary', lineHeight: 1.1,
                   fontSize: 'clamp(18px, 2.6vw, 32px)',
                   whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block',
                 }}
@@ -364,7 +375,7 @@ const Dashboard = () => {
                   <Typography sx={{ fontSize: 'clamp(10px, 0.9vw, 12px)', fontWeight: 700, color: card.trendVal.up ? '#0ECB81' : '#F6465D' }}>
                     {card.trendVal.pct}%
                   </Typography>
-                  <Typography sx={{ fontSize: 'clamp(9px, 0.8vw, 11px)', color: '#5C6470', display: { xs: 'none', sm: 'inline' } }}>
+                  <Typography sx={{ fontSize: 'clamp(9px, 0.8vw, 11px)', color: 'text.secondary', display: { xs: 'none', sm: 'inline' } }}>
                     vs last {rangeDays}d
                   </Typography>
                 </Box>
@@ -388,8 +399,16 @@ const Dashboard = () => {
           </Card>
         ))}
       </Box>
+      )}
 
       {/* Revenue chart + Collection donut + Today's summary */}
+      {showSkeleton ? (
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1.6fr 1fr 1fr' }, gap: { xs: 2, sm: 2.5 } }}>
+          <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, border: `1px solid ${theme.palette.divider}` }}><PanelSkeleton height={260} /></Paper>
+          <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, border: `1px solid ${theme.palette.divider}` }}><PanelSkeleton height={170} /></Paper>
+          <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, border: `1px solid ${theme.palette.divider}` }}><PanelSkeleton height={170} /></Paper>
+        </Box>
+      ) : (
       <Box
         sx={{
           display: 'grid',
@@ -398,11 +417,11 @@ const Dashboard = () => {
           alignItems: 'stretch',
         }}
       >
-        <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, background: '#161A1E', border: '1px solid #2B3139', minWidth: 0 }}>
-          <Typography sx={{ fontWeight: 700, color: '#EAECEF', fontSize: 'clamp(14px, 1.2vw, 18px)', mb: 0.5 }}>
+        <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}`, minWidth: 0 }}>
+          <Typography sx={{ fontWeight: 700, color: 'text.primary', fontSize: 'clamp(14px, 1.2vw, 18px)', mb: 0.5 }}>
             Revenue Overview
           </Typography>
-          <Typography sx={{ color: '#848E9C', fontSize: 'clamp(12px, 1vw, 14px)', mb: 1 }}>
+          <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(12px, 1vw, 14px)', mb: 1 }}>
             Total revenue ₹{totalRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })} · <Box component="span" sx={{ color: '#0ECB81' }}>● Collected</Box> <Box component="span" sx={{ color: '#F6465D' }}>● Pending</Box>
           </Typography>
           <Box sx={{ width: '100%', height: { xs: 200, sm: 260 } }}>
@@ -418,10 +437,10 @@ const Dashboard = () => {
                     <stop offset="100%" stopColor="#F6465D" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2B3139" vertical={false} />
-                <XAxis dataKey="date" stroke="#5C6470" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis stroke="#5C6470" fontSize={11} tickLine={false} axisLine={false} width={44} />
-                <RTooltip contentStyle={{ background: '#1E2329', border: '1px solid #2B3139', borderRadius: 8, color: '#EAECEF' }} />
+                <CartesianGrid strokeDasharray="3 3" stroke={theme.palette.divider} vertical={false} />
+                <XAxis dataKey="date" stroke={theme.palette.text.secondary} fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis stroke={theme.palette.text.secondary} fontSize={11} tickLine={false} axisLine={false} width={44} />
+                <RTooltip contentStyle={{ background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}`, borderRadius: 8, color: theme.palette.text.primary }} />
                 <Area type="monotone" dataKey="collected" name="Collected" stroke="#0ECB81" strokeWidth={2} fill="url(#collectedGrad)" isAnimationActive={false} />
                 <Area type="monotone" dataKey="pending" name="Pending" stroke="#F6465D" strokeWidth={2} fill="url(#pendingGrad)" isAnimationActive={false} />
               </AreaChart>
@@ -429,8 +448,8 @@ const Dashboard = () => {
           </Box>
         </Paper>
 
-        <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, background: '#161A1E', border: '1px solid #2B3139', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <Typography sx={{ fontWeight: 700, color: '#EAECEF', fontSize: 'clamp(14px, 1.2vw, 18px)', mb: 1 }}>
+        <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}`, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+          <Typography sx={{ fontWeight: 700, color: 'text.primary', fontSize: 'clamp(14px, 1.2vw, 18px)', mb: 1 }}>
             Collection Summary
           </Typography>
           <Box sx={{ position: 'relative', width: '100%', height: { xs: 140, sm: 170 } }}>
@@ -445,29 +464,29 @@ const Dashboard = () => {
               </PieChart>
             </ResponsiveContainer>
             <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-              <Typography sx={{ fontWeight: 800, color: '#EAECEF', fontSize: 'clamp(20px, 2vw, 26px)' }}>{collectedPct}%</Typography>
-              <Typography sx={{ color: '#848E9C', fontSize: 'clamp(10px, 0.9vw, 12px)' }}>Collected</Typography>
+              <Typography sx={{ fontWeight: 800, color: 'text.primary', fontSize: 'clamp(20px, 2vw, 26px)' }}>{collectedPct}%</Typography>
+              <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(10px, 0.9vw, 12px)' }}>Collected</Typography>
             </Box>
           </Box>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, mt: 1.5 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Typography sx={{ display: 'flex', alignItems: 'center', gap: 0.75, color: '#848E9C', fontSize: 'clamp(11px, 1vw, 13px)' }}>
+              <Typography sx={{ display: 'flex', alignItems: 'center', gap: 0.75, color: 'text.secondary', fontSize: 'clamp(11px, 1vw, 13px)' }}>
                 <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#0ECB81' }} /> Collected
               </Typography>
-              <Typography sx={{ color: '#EAECEF', fontWeight: 700, fontSize: 'clamp(11px, 1vw, 13px)' }}>
+              <Typography sx={{ color: 'text.primary', fontWeight: 700, fontSize: 'clamp(11px, 1vw, 13px)' }}>
                 ₹{collectedRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
               </Typography>
             </Box>
             <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Typography sx={{ display: 'flex', alignItems: 'center', gap: 0.75, color: '#848E9C', fontSize: 'clamp(11px, 1vw, 13px)' }}>
+              <Typography sx={{ display: 'flex', alignItems: 'center', gap: 0.75, color: 'text.secondary', fontSize: 'clamp(11px, 1vw, 13px)' }}>
                 <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#F6465D' }} /> Pending
               </Typography>
-              <Typography sx={{ color: '#EAECEF', fontWeight: 700, fontSize: 'clamp(11px, 1vw, 13px)' }}>
+              <Typography sx={{ color: 'text.primary', fontWeight: 700, fontSize: 'clamp(11px, 1vw, 13px)' }}>
                 ₹{pendingRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
               </Typography>
             </Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', pt: 0.75, mt: 0.5, borderTop: '1px solid #2B3139' }}>
-              <Typography sx={{ color: '#848E9C', fontSize: 'clamp(11px, 1vw, 13px)', fontWeight: 700 }}>Total Revenue</Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', pt: 0.75, mt: 0.5, borderTop: `1px solid ${theme.palette.divider}` }}>
+              <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(11px, 1vw, 13px)', fontWeight: 700 }}>Total Revenue</Typography>
               <Typography sx={{ color: '#F0B90B', fontWeight: 800, fontSize: 'clamp(11px, 1vw, 13px)' }}>
                 ₹{totalRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
               </Typography>
@@ -475,16 +494,16 @@ const Dashboard = () => {
           </Box>
         </Paper>
 
-        <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, background: '#161A1E', border: '1px solid #2B3139', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          <Typography sx={{ fontWeight: 700, color: '#EAECEF', fontSize: 'clamp(14px, 1.2vw, 18px)' }}>
+        <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}`, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+          <Typography sx={{ fontWeight: 700, color: 'text.primary', fontSize: 'clamp(14px, 1.2vw, 18px)' }}>
             Today's Summary
           </Typography>
-          <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: '#1E2329', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+          <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: 'action.hover', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, minWidth: 0 }}>
               <Avatar sx={{ bgcolor: 'rgba(240,185,11,0.12)', color: '#F0B90B', width: 36, height: 36 }}><LocalShipping fontSize="small" /></Avatar>
               <Box sx={{ minWidth: 0 }}>
-                <Typography sx={{ fontWeight: 800, color: '#EAECEF', fontSize: 'clamp(16px, 1.6vw, 20px)' }}>{todaysTrips.length}</Typography>
-                <Typography sx={{ color: '#848E9C', fontSize: 'clamp(10px, 0.9vw, 12px)' }}>Total Trips</Typography>
+                <Typography sx={{ fontWeight: 800, color: 'text.primary', fontSize: 'clamp(16px, 1.6vw, 20px)' }}>{todaysTrips.length}</Typography>
+                <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(10px, 0.9vw, 12px)' }}>Total Trips</Typography>
               </Box>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4 }}>
@@ -492,14 +511,14 @@ const Dashboard = () => {
               <Typography sx={{ fontSize: 'clamp(10px, 0.9vw, 12px)', fontWeight: 700, color: todaysTripsTrend.up ? '#0ECB81' : '#F6465D' }}>{todaysTripsTrend.pct}%</Typography>
             </Box>
           </Box>
-          <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: '#1E2329', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+          <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: 'action.hover', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, minWidth: 0 }}>
               <Avatar sx={{ bgcolor: 'rgba(14,203,129,0.12)', color: '#0ECB81', width: 36, height: 36 }}><AccountBalanceWallet fontSize="small" /></Avatar>
               <Box sx={{ minWidth: 0 }}>
-                <Typography sx={{ fontWeight: 800, color: '#EAECEF', fontSize: 'clamp(16px, 1.6vw, 20px)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <Typography sx={{ fontWeight: 800, color: 'text.primary', fontSize: 'clamp(16px, 1.6vw, 20px)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   ₹{todaysRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                 </Typography>
-                <Typography sx={{ color: '#848E9C', fontSize: 'clamp(10px, 0.9vw, 12px)' }}>Total Revenue</Typography>
+                <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(10px, 0.9vw, 12px)' }}>Total Revenue</Typography>
               </Box>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4 }}>
@@ -507,30 +526,42 @@ const Dashboard = () => {
               <Typography sx={{ fontSize: 'clamp(10px, 0.9vw, 12px)', fontWeight: 700, color: todaysRevenueTrend.up ? '#0ECB81' : '#F6465D' }}>{todaysRevenueTrend.pct}%</Typography>
             </Box>
           </Box>
-          <Typography sx={{ color: '#5C6470', fontSize: 'clamp(10px, 0.9vw, 12px)', mt: 'auto' }}>
+          <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(10px, 0.9vw, 12px)', mt: 'auto' }}>
             Compared to yesterday
           </Typography>
         </Paper>
       </Box>
+      )}
 
       {/* Recent Trips + Top Customers */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.3fr 1fr' }, gap: { xs: 2, sm: 2.5 } }}>
-        <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, background: '#161A1E', border: '1px solid #2B3139', minWidth: 0 }}>
+        <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}`, minWidth: 0 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-            <Typography sx={{ fontWeight: 700, color: '#EAECEF', fontSize: 'clamp(14px, 1.2vw, 18px)' }}>Recent Trips</Typography>
+            <Typography sx={{ fontWeight: 700, color: 'text.primary', fontSize: 'clamp(14px, 1.2vw, 18px)' }}>Recent Trips</Typography>
             {trips.length > 0 && (
-              <Button size="small" onClick={() => navigate('/trips')} sx={{ color: '#F0B90B', fontWeight: 700 }}>View All Trips</Button>
+              <Button
+                size="small"
+                onClick={() => navigate('/trips', { state: { from: toInputValue(rangeFrom), to: toInputValue(rangeTo) } })}
+                sx={{ color: '#F0B90B', fontWeight: 700 }}
+              >
+                View All Trips
+              </Button>
             )}
           </Box>
           {recentTrips.length === 0 ? (
-            <Typography sx={{ textAlign: 'center', py: 4, color: '#848E9C' }}>No trips recorded yet.</Typography>
+            <EmptyState
+              size="compact"
+              icon={<LocalShipping />}
+              title="No trips recorded yet"
+              description="Approved trips will show up here as they come in."
+            />
           ) : (
             <Box sx={{ overflowX: 'auto' }}>
               <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse', minWidth: 480 }}>
                 <Box component="thead">
                   <Box component="tr">
                     {['Customer', 'Route', 'Date', 'Amount', 'Status'].map((h, i) => (
-                      <Box component="th" key={h} sx={{ textAlign: (h === 'Amount' || h === 'Status') ? 'right' : 'left', color: '#848E9C', fontSize: 'clamp(10px, 0.85vw, 12px)', fontWeight: 700, textTransform: 'uppercase', pb: 1, pl: i === 0 ? 0 : 2, borderBottom: '1px solid #2B3139' }}>
+                      <Box component="th" key={h} sx={{ textAlign: (h === 'Amount' || h === 'Status') ? 'right' : 'left', color: 'text.secondary', fontSize: 'clamp(10px, 0.85vw, 12px)', fontWeight: 700, textTransform: 'uppercase', pb: 1, pl: i === 0 ? 0 : 2, borderBottom: `1px solid ${theme.palette.divider}` }}>
                         {h}
                       </Box>
                     ))}
@@ -545,28 +576,28 @@ const Dashboard = () => {
                         component="tr"
                         key={trip.id}
                         onClick={() => clickable && navigate(`/customer/${trip.customerId}`)}
-                        sx={{ cursor: clickable ? 'pointer' : 'default', '&:hover td': clickable ? { bgcolor: '#1E2329' } : {} }}
+                        sx={{ cursor: clickable ? 'pointer' : 'default', '&:hover td': clickable ? { bgcolor: 'action.hover' } : {} }}
                       >
-                        <Box component="td" sx={{ py: 1.25, pr: 2, borderBottom: '1px solid #1E2329' }}>
+                        <Box component="td" sx={{ py: 1.25, pr: 2, borderBottom: `1px solid ${theme.palette.divider}` }}>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                             <Avatar sx={{ width: 26, height: 26, fontSize: 12, bgcolor: 'rgba(240,185,11,0.15)', color: '#F0B90B' }}>
                               {(customer?.name || trip.customerName || '?').slice(0, 2).toUpperCase()}
                             </Avatar>
-                            <Typography sx={{ color: '#EAECEF', fontWeight: 600, fontSize: 'clamp(11px, 1vw, 13px)', whiteSpace: 'nowrap' }}>
+                            <Typography sx={{ color: 'text.primary', fontWeight: 600, fontSize: 'clamp(11px, 1vw, 13px)', whiteSpace: 'nowrap' }}>
                               {customer?.name || trip.customerName || 'Unknown'}
                             </Typography>
                           </Box>
                         </Box>
-                        <Box component="td" sx={{ py: 1.25, pr: 2, borderBottom: '1px solid #1E2329', color: '#848E9C', fontSize: 'clamp(11px, 1vw, 13px)', whiteSpace: 'nowrap' }}>
+                        <Box component="td" sx={{ py: 1.25, pr: 2, borderBottom: `1px solid ${theme.palette.divider}`, color: 'text.secondary', fontSize: 'clamp(11px, 1vw, 13px)', whiteSpace: 'nowrap' }}>
                           {trip.pickupLocation} → {trip.dropLocation}
                         </Box>
-                        <Box component="td" sx={{ py: 1.25, pr: 2, borderBottom: '1px solid #1E2329', color: '#848E9C', fontSize: 'clamp(11px, 1vw, 13px)', whiteSpace: 'nowrap' }}>
+                        <Box component="td" sx={{ py: 1.25, pr: 2, borderBottom: `1px solid ${theme.palette.divider}`, color: 'text.secondary', fontSize: 'clamp(11px, 1vw, 13px)', whiteSpace: 'nowrap' }}>
                           {new Date(trip.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                         </Box>
-                        <Box component="td" sx={{ py: 1.25, pl: 2, borderBottom: '1px solid #1E2329', textAlign: 'right', fontWeight: 700, color: '#EAECEF', fontSize: 'clamp(11px, 1vw, 13px)', whiteSpace: 'nowrap' }}>
+                        <Box component="td" sx={{ py: 1.25, pl: 2, borderBottom: `1px solid ${theme.palette.divider}`, textAlign: 'right', fontWeight: 700, color: 'text.primary', fontSize: 'clamp(11px, 1vw, 13px)', whiteSpace: 'nowrap' }}>
                           ₹{tripAmount(trip).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                         </Box>
-                        <Box component="td" sx={{ py: 1.25, pl: 2, borderBottom: '1px solid #1E2329', textAlign: 'right' }}>
+                        <Box component="td" sx={{ py: 1.25, pl: 2, borderBottom: `1px solid ${theme.palette.divider}`, textAlign: 'right' }}>
                           <Chip
                             label={trip.isPaid ? 'Paid' : 'Pending'}
                             size="small"
@@ -586,15 +617,20 @@ const Dashboard = () => {
           )}
         </Paper>
 
-        <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, background: '#161A1E', border: '1px solid #2B3139', minWidth: 0 }}>
+        <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}`, minWidth: 0 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-            <Typography sx={{ fontWeight: 700, color: '#EAECEF', fontSize: 'clamp(14px, 1.2vw, 18px)' }}>Top Customers</Typography>
+            <Typography sx={{ fontWeight: 700, color: 'text.primary', fontSize: 'clamp(14px, 1.2vw, 18px)' }}>Top Customers</Typography>
             {customers.length > 0 && (
               <Button size="small" onClick={() => navigate('/customers')} sx={{ color: '#F0B90B', fontWeight: 700 }}>View All</Button>
             )}
           </Box>
           {topCustomers.length === 0 ? (
-            <Typography sx={{ textAlign: 'center', py: 4, color: '#848E9C' }}>No trips in this date range yet.</Typography>
+            <EmptyState
+              size="compact"
+              icon={<QueryStats />}
+              title="Nothing in this range yet"
+              description="Try a wider date range to see your top customers."
+            />
           ) : (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               {topCustomers.map((customer, index) => (
@@ -602,10 +638,10 @@ const Dashboard = () => {
                   key={customer.id}
                   onClick={() => navigate(`/customer/${customer.id}`)}
                   sx={{
-                    p: 1.25, borderRadius: 2, backgroundColor: '#1E2329',
+                    p: 1.25, borderRadius: 2, backgroundColor: 'action.hover',
                     transition: 'background-color 0.2s', cursor: 'pointer',
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    '&:hover': { backgroundColor: '#2B3139' },
+                    '&:hover': { backgroundColor: 'divider' },
                   }}
                 >
                   <Box sx={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
@@ -613,22 +649,22 @@ const Dashboard = () => {
                       {index + 1}
                     </Avatar>
                     <Box sx={{ minWidth: 0 }}>
-                      <Typography sx={{ fontWeight: 600, color: '#EAECEF', fontSize: 'clamp(12px, 1vw, 14px)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <Typography sx={{ fontWeight: 600, color: 'text.primary', fontSize: 'clamp(12px, 1vw, 14px)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {customer.name}
                       </Typography>
-                      <Typography sx={{ color: '#848E9C', fontSize: 'clamp(10px, 0.85vw, 12px)' }}>
+                      <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(10px, 0.85vw, 12px)' }}>
                         {customer.tripCount} trip{customer.tripCount === 1 ? '' : 's'}
                       </Typography>
                     </Box>
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
                     <Box sx={{ textAlign: 'right' }}>
-                      <Typography sx={{ color: '#5C6470', fontSize: 'clamp(9px, 0.8vw, 11px)', lineHeight: 1.2 }}>Net Payable</Typography>
+                      <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(9px, 0.8vw, 11px)', lineHeight: 1.2 }}>Net Payable</Typography>
                       <Typography sx={{ fontWeight: 700, fontSize: 'clamp(11px, 1vw, 13px)', color: customer.netPayable > 0 ? '#F6465D' : '#0ECB81' }}>
                         ₹{customer.netPayable.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                       </Typography>
                     </Box>
-                    <ArrowForward sx={{ fontSize: 16, color: '#848E9C' }} />
+                    <ArrowForward sx={{ fontSize: 16, color: 'text.secondary' }} />
                   </Box>
                 </Box>
               ))}

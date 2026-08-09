@@ -50,3 +50,61 @@ html, body {
   color: var(--text-color);
   font-weight: bold;
 }
+
+/* Selection color matches the brand accent instead of the browser default blue. */
+::selection {
+  background-color: rgba(240, 185, 11, 0.35);
+  color: inherit;
+}
+
+/* Slim, unobtrusive scrollbar — matches the app's dark, flat aesthetic instead of the OS default. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2B3139 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: #2B3139;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #474D57;
+}
+
+/* Keyframes shared by a few components (EmptyState, PageTransition, Toast). Kept here rather than
+   inline per-component so they're defined once. */
+@keyframes fade-scale-in {
+  from { opacity: 0; transform: scale(0.97) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes gentle-pop {
+  0% { transform: scale(0.9); opacity: 0; }
+  60% { transform: scale(1.03); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+/* Respect the OS-level "reduce motion" accessibility setting — turns off all the decorative
+   transitions/animations this pass added (button press scale, card lift, fade-ins, etc.) while
+   leaving layout and functionality completely untouched. This is a blanket override rather than
+   threading a `prefers-reduced-motion` check through every component. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Keyboard focus only — mouse/touch users don't see a ring on every click, matching how this
+   app's inputs already indicate focus via border color instead. */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid #F0B90B;
+  outline-offset: 2px;
+}

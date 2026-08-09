@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Box,
   Typography,
@@ -10,24 +10,46 @@ import {
   FormControlLabel,
   Paper,
   Divider,
+  Autocomplete,
+  useTheme,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useAppContext } from '../context/AppContext';
 import type { Trip } from '../types';
+import { useToast } from './ToastProvider';
 
 interface TripFormProps {
   customerId: string;
   onTripAdded?: () => void;
 }
 
+interface DriverOption {
+  id: string;
+  label: string;
+}
+
+const SELF_DRIVER_OPTION: DriverOption = { id: 'self', label: 'Self (Admin)' };
+
 const TripForm: React.FC<TripFormProps> = ({ customerId, onTripAdded }) => {
-  const { addTrip, customers } = useAppContext();
+  const { addTrip, customers, drivers } = useAppContext();
+  const theme = useTheme();
+  const toast = useToast();
   const customer = customers.find(c => c.id === customerId);
-  
-  console.log('TripForm rendered with customerId:', customerId);
-  console.log('Found customer:', customer);
+
+  // Every admin-created trip must be explicitly attributed to a driver or to the admin
+  // themself — no default selection, so it's never silently misattributed.
+  const driverOptions = useMemo<DriverOption[]>(
+    () => [
+      SELF_DRIVER_OPTION,
+      ...drivers
+        .filter(d => d.active)
+        .map(d => ({ id: d.id, label: `${d.name}${d.userCode ? ` (${d.userCode})` : ''}` })),
+    ],
+    [drivers],
+  );
+  const [selectedDriver, setSelectedDriver] = useState<DriverOption | null>(null);
 
   const [tripData, setTripData] = useState<Omit<Trip, 'id'>>({
     customerId,
@@ -48,6 +70,7 @@ const TripForm: React.FC<TripFormProps> = ({ customerId, onTripAdded }) => {
     vehicleType: '',
     advanceAmount: '',
     amount: '',
+    driver: '',
   });
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -103,7 +126,13 @@ const TripForm: React.FC<TripFormProps> = ({ customerId, onTripAdded }) => {
       vehicleType: '',
       advanceAmount: '',
       amount: '',
+      driver: '',
     };
+
+    if (!selectedDriver) {
+      newErrors.driver = 'Select a driver, or Self';
+      valid = false;
+    }
 
     if (!tripData.pickupLocation.trim()) {
       newErrors.pickupLocation = 'Pickup location is required';
@@ -136,45 +165,66 @@ const TripForm: React.FC<TripFormProps> = ({ customerId, onTripAdded }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('Form submitted with data:', tripData);
+    if (!validateForm() || !selectedDriver) return;
 
-    if (validateForm()) {
-      try {
-        const tripId = await addTrip(tripData);
-        console.log('Trip added successfully with ID:', tripId);
+    try {
+      await addTrip({ ...tripData, driverId: selectedDriver.id });
+      toast.success('Trip added.');
 
-        setTripData({
-          customerId,
-          date: new Date().toISOString(),
-          pickupLocation: '',
-          dropLocation: '',
-          vehicleType: '',
-          vehicleNumber: '',
-          materialType: '',
-          amount: 0,
-          isPaid: false,
-        });
+      setTripData({
+        customerId,
+        date: new Date().toISOString(),
+        pickupLocation: '',
+        dropLocation: '',
+        vehicleType: '',
+        vehicleNumber: '',
+        materialType: '',
+        amount: 0,
+        isPaid: false,
+      });
+      setSelectedDriver(null);
 
-        // Notify parent component
-        if (onTripAdded) {
-          onTripAdded();
-        }
-      } catch (error) {
-        console.error('Error adding trip:', error);
+      // Notify parent component
+      if (onTripAdded) {
+        onTripAdded();
       }
-    } else {
-      console.log('Form validation failed with errors:', errors);
+    } catch (error) {
+      // Previously silently logged to the console only — the admin had no way to know the trip
+      // wasn't actually saved.
+      toast.error(error instanceof Error ? error.message : 'Could not add trip. Please try again.');
     }
   };
 
   return (
-    <Paper elevation={0} sx={{ p: { xs: 2, sm: 4 }, mb: 4, borderRadius: 2, background: '#161A1E', border: '1px solid #2B3139' }}>
-      <Typography variant="h5" gutterBottom sx={{ fontWeight: 700, mb: 2, color: '#EAECEF' }}>
+    <Paper elevation={0} sx={{ p: { xs: 2, sm: 4 }, mb: 4, borderRadius: 2, background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}` }}>
+      <Typography variant="h5" gutterBottom sx={{ fontWeight: 700, mb: 2, color: 'text.primary' }}>
         Add New Trip for <span style={{ color: '#F0B90B' }}>{customer?.name}</span>
       </Typography>
-      <Divider sx={{ mb: 3, borderColor: '#2B3139' }} />
+      <Divider sx={{ mb: 3, borderColor: 'divider' }} />
       <form onSubmit={handleSubmit}>
         <Grid container spacing={3}>
+          <Grid item xs={12} sm={6}>
+            <Autocomplete
+              options={driverOptions}
+              getOptionLabel={option => option.label}
+              isOptionEqualToValue={(option, value) => option.id === value.id}
+              value={selectedDriver}
+              onChange={(_, value) => {
+                setSelectedDriver(value);
+                if (value) setErrors(prev => ({ ...prev, driver: '' }));
+              }}
+              renderInput={params => (
+                <TextField
+                  {...params}
+                  label="Driver"
+                  placeholder="Select a driver, or Self"
+                  error={!!errors.driver}
+                  helperText={errors.driver}
+                />
+              )}
+            />
+          </Grid>
+
           <Grid item xs={12} sm={6}>
             <LocalizationProvider dateAdapter={AdapterDateFns}>
               <DatePicker
@@ -186,11 +236,11 @@ const TripForm: React.FC<TripFormProps> = ({ customerId, onTripAdded }) => {
                     fullWidth: true,
                     variant: 'outlined',
                     sx: {
-                      '& .MuiInputBase-input': { color: '#EAECEF' },
-                      '& .MuiInputLabel-root': { color: '#848E9C' },
-                      '& .MuiOutlinedInput-notchedOutline': { borderColor: '#2B3139' },
+                      '& .MuiInputBase-input': { color: 'text.primary' },
+                      '& .MuiInputLabel-root': { color: 'text.secondary' },
+                      '& .MuiOutlinedInput-notchedOutline': { borderColor: 'divider' },
                       '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#F0B90B' },
-                      '& .MuiSvgIcon-root': { color: '#848E9C' },
+                      '& .MuiSvgIcon-root': { color: 'text.secondary' },
                     },
                   },
                 }}
@@ -304,7 +354,7 @@ const TripForm: React.FC<TripFormProps> = ({ customerId, onTripAdded }) => {
                     checked={tripData.isPaid}
                     onChange={handleCheckboxChange}
                     sx={{
-                      color: '#848E9C',
+                      color: 'text.secondary',
                       '&.Mui-checked': {
                         color: '#0ECB81',
                         '& .MuiSvgIcon-root': { fontSize: 24 }
@@ -313,7 +363,7 @@ const TripForm: React.FC<TripFormProps> = ({ customerId, onTripAdded }) => {
                     }}
                   />
                 }
-                label={<Typography sx={{ fontWeight: 600, color: tripData.isPaid ? '#0ECB81' : '#848E9C' }}>Payment Received</Typography>}
+                label={<Typography sx={{ fontWeight: 600, color: tripData.isPaid ? '#0ECB81' : 'text.secondary' }}>Payment Received</Typography>}
               />
             </Box>
           </Grid>
@@ -329,7 +379,7 @@ const TripForm: React.FC<TripFormProps> = ({ customerId, onTripAdded }) => {
                   fontWeight: 600,
                   padding: '10px 32px',
                   borderRadius: 2,
-                  color: '#0B0E11',
+                  color: 'primary.contrastText',
                   background: '#F0B90B',
                   boxShadow: 'none',
                   '&:hover': {

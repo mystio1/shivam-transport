@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+# A build that fails lint/build/test can never reach production — Render's own auto-deploy-on-push
+# is turned off (see render.yaml), and this workflow's `deploy` job is the ONLY thing that calls
+# the Render Deploy Hook, gated on the other three jobs passing first.
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      # Prisma's generator only needs a schema and a syntactically valid connection string to
+      # emit the client — it never connects to a database (see prisma.config.ts's env() calls).
+      - run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          DIRECT_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      - run: npm run build
+      - run: npm run build:backend
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: shivam_transport_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # No PgBouncer in front of the CI service container, so the pooled and direct URLs are
+      # identical here — this is exactly the Supabase-shaped dual-URL config the app runs with in
+      # production (see prisma/schema.prisma and prisma.config.ts), just pointed at a plain
+      # single-connection Postgres instead of a pooled one.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/shivam_transport_test
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/shivam_transport_test
+      SESSION_SECRET: ci-test-session-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - run: npm test
+
+  deploy:
+    needs: [lint, build, test]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy hook
+        run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL secret is not set — skipping deploy trigger." >&2
+            exit 1
+          fi
+          curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"

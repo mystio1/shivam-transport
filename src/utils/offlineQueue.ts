@@ -44,3 +44,21 @@ export function removeQueuedTrip(localId: string) {
 export function getQueueCount(): number {
   return readQueue().length;
 }
+
+// One of these is generated per trip submission and sent as `clientRequestId` on every attempt
+// (the initial POST and every retry out of the offline queue) — the server uses it to recognize
+// a retry of a submission that actually succeeded but whose response the client never saw
+// (dropped connection right after the server committed), instead of creating a duplicate trip.
+// `crypto.randomUUID()` needs a secure context (HTTPS/localhost) and this app deliberately also
+// supports plain-HTTP LAN access (drivers hitting a laptop's LAN IP directly), so this falls back
+// to a plain unique string there — it only needs to be unique, not cryptographically random.
+export function generateClientRequestId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      // fall through to the manual fallback below
+    }
+  }
+  return `crid-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}

@@ -31,6 +31,7 @@ export interface AppUser {
   role: UserRole;
   name: string;
   phone: string;
+  email?: string;
   userCode?: string;
   active: boolean;
   createdAt: string;
@@ -41,6 +42,26 @@ export interface AppGroup {
   code: string;
   name: string;
   createdAt: string;
+  frozen?: boolean;
+}
+
+// One row in the /support console's business list — a lightweight overview, not the full group
+// record, so the support tool never has to load a business's actual customer/trip data just to
+// show a directory of who exists.
+export interface SupportBusinessSummary {
+  code: string;
+  name: string;
+  createdAt: string;
+  adminCount: number;
+  driverCount: number;
+  customerCount: number;
+  tripCount: number;
+  frozen: boolean;
+  // `null` means unlimited (the default until support sets a cap).
+  maxDrivers: number | null;
+  maxAdmins: number | null;
+  maxBillsPerDay: number | null;
+  billsToday: number;
 }
 
 export type TripStatus = 'pending' | 'approved' | 'rejected';
@@ -66,6 +87,9 @@ export interface Trip {
   paidAmount?: number;
   paymentMode?: PaymentMode;
   paidAt?: string;
+  // Free-text note on how a payment was received (e.g. "Cash via driver", "UPI to personal a/c")
+  // — set from the Record Payment dialog, shown back wherever the trip's payment is displayed.
+  paymentNote?: string;
   vehicleType: string;
   vehicleNumber?: string;
   materialType?: string;
@@ -75,6 +99,26 @@ export interface Trip {
   updatedAt?: string;
   approvedAt?: string;
   approvedBy?: string;
+  // Set by the offline queue (src/utils/offlineQueue.ts) so a retried submission that actually
+  // succeeded but lost its response can be recognized server-side instead of duplicated.
+  clientRequestId?: string;
+}
+
+// A driver's request to change something on a trip that's already been approved (and so can no
+// longer be edited directly — see Trip.status and the pending-only edit rule around it). An
+// admin reviews the message and either applies the change themself or dismisses the request.
+export type TripEditRequestStatus = 'pending' | 'resolved' | 'dismissed';
+
+export interface TripEditRequest {
+  id: string;
+  groupCode?: string;
+  tripId: string;
+  driverId: string;
+  driverName?: string;
+  message: string;
+  status: TripEditRequestStatus;
+  createdAt: string;
+  resolvedAt?: string;
 }
 
 export interface BankAccount {
@@ -99,6 +143,16 @@ export interface Branding {
   accentColor: string;
   logoDataUrl: string;
   signatureDataUrl: string;
+  // Flank the company name on printed bills — left/right of "SHIVAM TRANSPORT" in the header.
+  // Both slots share the same fixed aspect ratio (see src/utils/headerImage.ts) so the header
+  // never looks lopsided whether one, both, or neither is set.
+  headerLeftImageDataUrl: string;
+  headerRightImageDataUrl: string;
+  // UPI/payment scanner shown on the printed bill, right of "Amount in Words" below Net Payable.
+  upiQrImageDataUrl: string;
+  // Which bill type(s) it appears on — lets the admin scope it to GST bills, Non-GST bills, or
+  // both, since not every business wants the same payment collection method on every invoice.
+  upiQrShowOn: 'both' | 'gst' | 'non-gst';
   bankName: string;
   bankBranch: string;
   bankAccountNumber: string;
@@ -110,6 +164,27 @@ export interface Branding {
 
 export interface CustomerWithBalance extends Customer {
   balance: number;
+}
+
+// One expiry-tracked segment on a vehicle — Insurance and PUC are just the two suggested first;
+// `label` is free text so the admin can add any number of other segments (Fitness Certificate,
+// Permit, Road Tax, ...) the same way.
+export interface VehicleDocument {
+  id: string;
+  label: string;
+  expiryDate: string;
+  reminderDaysBefore: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface Vehicle {
+  id: string;
+  groupCode?: string;
+  vehicleNumber: string;
+  documents: VehicleDocument[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export type TripInput = Omit<Trip, 'id' | 'status'> & {

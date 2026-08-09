@@ -7,35 +7,55 @@ import type {
   Customer,
   CustomerWithBalance,
   SavedBill,
+  SupportBusinessSummary,
   Trip,
+  TripEditRequest,
   TripInput,
+  Vehicle,
+  VehicleDocument,
 } from '../types';
 import type { PaletteMode } from '@mui/material';
-import { enqueueTrip, getQueueCount, getQueuedTrips, removeQueuedTrip } from '../utils/offlineQueue';
+import { enqueueTrip, generateClientRequestId, getQueueCount, getQueuedTrips, removeQueuedTrip } from '../utils/offlineQueue';
+import { scheduleDocumentReminders } from '../utils/documentReminders';
+import { documentStatus, type DocumentStatus } from '../utils/documentStatus';
+import { TOKEN_KEY, getApiBase, setApiBase } from '../utils/serverConnection';
 
-const TOKEN_KEY = 'shivam_session_token';
-const SERVER_URL_KEY = 'shivam_server_url';
+const DOC_NOTIF_PREFS_KEY = 'shivam_doc_notif_prefs';
+const DOC_REMINDER_SNOOZE_MS = 24 * 60 * 60 * 1000;
 
-const BUILT_IN_DEFAULT_BASE =
-  import.meta.env.VITE_API_URL ||
-  (typeof window !== 'undefined' && window.location.port !== '5173'
-    ? ''
-    : 'http://localhost:4000');
-
-// The server address a driver/admin's phone talks to is resolved at RUNTIME (not baked into
-// the build) so the same installed app can be pointed at whichever server the admin runs —
-// e.g. a Cloudflare Tunnel URL shared via the join screen. Falls back to the build-time default.
-function getApiBase(): string {
-  if (typeof window === 'undefined') return BUILT_IN_DEFAULT_BASE;
-  const stored = window.localStorage.getItem(SERVER_URL_KEY);
-  return (stored && stored.trim()) || BUILT_IN_DEFAULT_BASE;
+// Keyed by document id. Kept per-browser (not synced to the server) since it's a personal
+// "stop bugging me about this one" preference, not shared account data. `expiryDate` pins the
+// preference to the document's CURRENT expiry — renewing the document (a new expiryDate) makes
+// the stored preference stop matching, so the reminder reappears automatically without needing
+// its own cleanup logic.
+export interface DocumentReminderPref {
+  status: 'snoozed' | 'dismissed';
+  expiryDate: string;
+  until?: number; // epoch ms; only set for 'snoozed'
 }
 
-function setApiBase(url: string) {
-  if (typeof window === 'undefined') return;
-  const trimmed = url.trim().replace(/\/+$/, '');
-  if (trimmed) window.localStorage.setItem(SERVER_URL_KEY, trimmed);
-  else window.localStorage.removeItem(SERVER_URL_KEY);
+export interface ActiveDocumentReminder {
+  vehicleId: string;
+  vehicleNumber: string;
+  document: VehicleDocument;
+  status: DocumentStatus;
+}
+
+function loadDocNotifPrefs(): Record<string, DocumentReminderPref> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(DOC_NOTIF_PREFS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+const THEME_MODE_KEY = 'shivam_theme_mode';
+
+function getStoredThemeMode(): PaletteMode {
+  if (typeof window === 'undefined') return 'dark';
+  return window.localStorage.getItem(THEME_MODE_KEY) === 'light' ? 'light' : 'dark';
 }
 
 export interface SignupInput {
@@ -45,6 +65,7 @@ export interface SignupInput {
   role: 'admin' | 'driver';
   groupCode?: string;
   groupName?: string;
+  email?: string;
 }
 
 export interface LoginInput {
@@ -74,7 +95,7 @@ interface AppContextType {
   mergeCustomer: (sourceId: string, intoCustomerId: string) => Promise<void>;
   recordTripPayment: (
     tripId: string,
-    input: { amount?: number; fullyPaid?: boolean; fromAdvance?: boolean; paymentMode?: string },
+    input: { amount?: number; fullyPaid?: boolean; fromAdvance?: boolean; paymentMode?: string; note?: string },
   ) => Promise<void>;
   addTrip: (trip: Omit<Trip, 'id'>) => Promise<string>;
   submitDriverTrip: (trip: Omit<Trip, 'id' | 'customerId'> & { customerId?: string }) => Promise<{ queued: boolean }>;
@@ -84,6 +105,9 @@ interface AppContextType {
   approveTrip: (tripId: string) => Promise<void>;
   rejectTrip: (tripId: string, reason: string) => Promise<void>;
   updateTrip: (tripId: string, updates: Partial<Trip>) => Promise<void>;
+  tripEditRequests: TripEditRequest[];
+  requestTripEdit: (tripId: string, message: string) => Promise<void>;
+  resolveTripEditRequest: (requestId: string, status: 'resolved' | 'dismissed') => Promise<void>;
   getCustomerTrips: (customerId: string) => Trip[];
   getFilteredTrips: (date: string | null) => Trip[];
   deleteCustomer: (customerId: string) => Promise<void>;
@@ -92,6 +116,20 @@ interface AppContextType {
   login: (input: LoginInput) => Promise<void>;
   signup: (input: SignupInput) => Promise<{ groupCode: string | null }>;
   logout: () => Promise<void>;
+  supportLogin: (password: string) => Promise<string>;
+  supportListBusinesses: (supportToken: string) => Promise<SupportBusinessSummary[]>;
+  supportAccessBusiness: (supportToken: string, groupCode: string) => Promise<void>;
+  supportSetFrozen: (supportToken: string, groupCode: string, frozen: boolean) => Promise<void>;
+  supportSetLimits: (
+    supportToken: string,
+    groupCode: string,
+    limits: { maxDrivers: number | null; maxAdmins: number | null; maxBillsPerDay: number | null },
+  ) => Promise<void>;
+  forgotPassword: (phone: string, groupCode: string) => Promise<string>;
+  verifyResetOtp: (phone: string, groupCode: string, otp: string) => Promise<void>;
+  resetPassword: (phone: string, groupCode: string, otp: string, newPassword: string) => Promise<void>;
+  updateMyEmail: (email: string) => Promise<void>;
+  resetDriverPassword: (driverId: string, newPassword: string) => Promise<void>;
   refreshData: () => Promise<void>;
   updateBranding: (updates: Partial<Branding>) => Promise<void>;
   getNextInvoiceNumber: () => Promise<number>;
@@ -102,9 +140,27 @@ interface AppContextType {
   toggleThemeMode: () => void;
   bills: SavedBill[];
   saveBill: (input: Omit<SavedBill, 'id' | 'groupCode' | 'createdAt' | 'createdBy' | 'customerName'>) => Promise<SavedBill>;
+  checkBillGenerationLimit: (customerId: string, method: 'pdf' | 'whatsapp') => Promise<void>;
   deleteBill: (billId: string) => Promise<void>;
   permanentlyDeleteBill: (billId: string) => Promise<void>;
   restoreBackup: (customers: unknown[], trips: unknown[]) => Promise<{ customersImported: number; tripsImported: number }>;
+  vehicles: Vehicle[];
+  addVehicle: (vehicleNumber: string) => Promise<Vehicle>;
+  updateVehicle: (vehicleId: string, vehicleNumber: string) => Promise<void>;
+  deleteVehicle: (vehicleId: string) => Promise<void>;
+  addVehicleDocument: (
+    vehicleId: string,
+    input: { label: string; expiryDate: string; reminderDaysBefore?: number },
+  ) => Promise<void>;
+  updateVehicleDocument: (
+    vehicleId: string,
+    documentId: string,
+    updates: { label?: string; expiryDate?: string; reminderDaysBefore?: number },
+  ) => Promise<void>;
+  deleteVehicleDocument: (vehicleId: string, documentId: string) => Promise<void>;
+  activeDocumentReminders: ActiveDocumentReminder[];
+  snoozeDocumentReminder: (documentId: string, expiryDate: string) => void;
+  dismissDocumentReminder: (documentId: string, expiryDate: string) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -159,7 +215,7 @@ export const AppProvider = ({ children }: AppProviderProps) => {
   const [drivers, setDrivers]     = useState<AppUser[]>([]);
   const [isLoading, setIsLoading]   = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
-  const [themeMode, setThemeMode]   = useState<PaletteMode>('dark');
+  const [themeMode, setThemeMode]   = useState<PaletteMode>(getStoredThemeMode);
   const [user, setUser]   = useState<AppUser | null>(null);
   const [group, setGroup] = useState<AppGroup | null>(null);
   const [branding, setBranding] = useState<Branding | null>(null);
@@ -167,6 +223,9 @@ export const AppProvider = ({ children }: AppProviderProps) => {
   const [pendingSyncCount, setPendingSyncCount] = useState<number>(() => getQueueCount());
   const [isSyncingOffline, setIsSyncingOffline] = useState(false);
   const [bills, setBills] = useState<SavedBill[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [tripEditRequests, setTripEditRequests] = useState<TripEditRequest[]>([]);
+  const [docNotifPrefs, setDocNotifPrefs] = useState<Record<string, DocumentReminderPref>>(loadDocNotifPrefs);
 
   const trips = useMemo(() => allTrips.filter(approvedTrip), [allTrips]);
   const pendingTrips = useMemo(
@@ -186,6 +245,8 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     setBranding(null);
     setDrivers([]);
     setBills([]);
+    setVehicles([]);
+    setTripEditRequests([]);
   }, []);
 
   // ── Data loading ───────────────────────────────────────────────────────
@@ -194,18 +255,22 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     if (!token) return;
     setIsLoading(true);
     try {
-      const [customersResp, tripsResp, brandingResp, driversResp, billsResp] = await Promise.all([
+      const [customersResp, tripsResp, brandingResp, driversResp, billsResp, vehiclesResp, editRequestsResp] = await Promise.all([
         apiRequest<{ customers: Customer[] }>('/api/customers'),
         apiRequest<{ trips: Trip[] }>('/api/trips'),
         apiRequest<{ branding: Branding }>('/api/branding').catch(() => null),
         apiRequest<{ drivers: AppUser[] }>('/api/drivers').catch(() => null),
         apiRequest<{ bills: SavedBill[] }>('/api/bills').catch(() => null),
+        apiRequest<{ vehicles: Vehicle[] }>('/api/vehicles').catch(() => null),
+        apiRequest<{ requests: TripEditRequest[] }>('/api/trip-edit-requests').catch(() => null),
       ]);
       setCustomers(customersResp.customers);
       setAllTrips(tripsResp.trips);
       if (brandingResp) setBranding(brandingResp.branding);
       if (driversResp) setDrivers(driversResp.drivers);
       if (billsResp) setBills(billsResp.bills);
+      if (vehiclesResp) setVehicles(vehiclesResp.vehicles);
+      if (editRequestsResp) setTripEditRequests(editRequestsResp.requests);
     } finally {
       setIsLoading(false);
     }
@@ -234,6 +299,53 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     if (user) refreshData();
   }, [user, refreshData]);
 
+  // ── Document-expiry reminders (in-app notification center + native push) ──
+  useEffect(() => {
+    window.localStorage.setItem(DOC_NOTIF_PREFS_KEY, JSON.stringify(docNotifPrefs));
+  }, [docNotifPrefs]);
+
+  // Every vehicle document that's due-soon or expired, minus whichever ones the admin snoozed
+  // (until the snooze expires) or permanently dismissed for their current expiry date. Sorted
+  // soonest-to-expire (and therefore already-expired) first. This is the single source of truth
+  // behind the notification bell, the sidebar badge, the Layout banner, and native scheduling —
+  // one list so all four always agree.
+  const activeDocumentReminders = useMemo<ActiveDocumentReminder[]>(() => {
+    const now = Date.now();
+    const result: ActiveDocumentReminder[] = [];
+    for (const vehicle of vehicles) {
+      for (const document of vehicle.documents) {
+        const status = documentStatus(document);
+        if (status.state === 'ok') continue;
+        const pref = docNotifPrefs[document.id];
+        if (pref && pref.expiryDate === document.expiryDate) {
+          if (pref.status === 'dismissed') continue;
+          if (pref.status === 'snoozed' && pref.until && pref.until > now) continue;
+        }
+        result.push({ vehicleId: vehicle.id, vehicleNumber: vehicle.vehicleNumber, document, status });
+      }
+    }
+    return result.sort((a, b) => a.status.daysUntilExpiry - b.status.daysUntilExpiry);
+  }, [vehicles, docNotifPrefs]);
+
+  const snoozeDocumentReminder = useCallback((documentId: string, expiryDate: string) => {
+    setDocNotifPrefs(prev => ({
+      ...prev,
+      [documentId]: { status: 'snoozed', expiryDate, until: Date.now() + DOC_REMINDER_SNOOZE_MS },
+    }));
+  }, []);
+
+  const dismissDocumentReminder = useCallback((documentId: string, expiryDate: string) => {
+    setDocNotifPrefs(prev => ({ ...prev, [documentId]: { status: 'dismissed', expiryDate } }));
+  }, []);
+
+  // Native device push — re-runs whenever the active-reminder list changes (login, app open, any
+  // add/edit/delete of a vehicle or document, or a snooze/dismiss action), so scheduled
+  // notifications never drift from what's actually active.
+  useEffect(() => {
+    if (user?.role !== 'admin') return;
+    scheduleDocumentReminders(activeDocumentReminders.map(r => ({ vehicleNumber: r.vehicleNumber, document: r.document }))).catch(() => {});
+  }, [activeDocumentReminders, user]);
+
   // ── Real-time updates via SSE ─────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
@@ -244,7 +356,25 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     events.addEventListener('data-changed',   handleChange);
     events.addEventListener('trip-submitted', handleChange);
     events.addEventListener('trip-updated',   handleChange);
-    events.onerror = () => events.close();
+    // Pushed by the support console's freeze/unfreeze toggle — applies instantly to every open
+    // device on this group code, admin and driver alike, without waiting for a page reload.
+    events.addEventListener('account-frozen',   () => setGroup(prev => (prev ? { ...prev, frozen: true } : prev)));
+    events.addEventListener('account-unfrozen', () => setGroup(prev => (prev ? { ...prev, frozen: false } : prev)));
+    // Sent once right after the connection opens (including every reconnect) — used as a cheap
+    // "catch up" signal: re-checking /api/me here means a freeze/unfreeze (or anything else) that
+    // happened during a dropped connection (phone backgrounded, brief network loss, ...) still
+    // gets picked up the moment the connection comes back, with no page reload needed.
+    events.addEventListener('connected', () => {
+      apiRequest<{ user: AppUser; group: AppGroup }>('/api/me').then(me => {
+        setUser(me.user);
+        setGroup(me.group);
+      }).catch(() => {});
+    });
+    // Deliberately NOT closing here — the browser's native EventSource already retries on its own
+    // after a drop (network blip, phone backgrounding, ...). Calling close() in onerror, as this
+    // used to, permanently kills that built-in retry, which is why a freeze/unfreeze (or any other
+    // live update) would silently stop arriving until the page was manually reloaded.
+    events.onerror = () => {};
     return () => events.close();
   }, [user, getToken, refreshData]);
 
@@ -272,6 +402,96 @@ export const AppProvider = ({ children }: AppProviderProps) => {
 
   const logout = async (): Promise<void> => {
     clearSession();
+  };
+
+  // ── Support/master access (cross-tenant, for remote troubleshooting) ──────
+  // Used only by the standalone /support console (see pages/SupportConsole.tsx) — not reachable
+  // from anywhere in the normal client-facing UI. The support token itself lives in that page's
+  // own state (not here), since it's a separate, short-lived credential unrelated to any one
+  // business's session; these just make the three backend calls it needs.
+  const supportLogin = async (password: string): Promise<string> => {
+    const result = await apiRequest<{ token: string }>('/api/support/login', {
+      method: 'POST', body: { password }, token: null,
+    });
+    return result.token;
+  };
+
+  const supportListBusinesses = async (supportToken: string): Promise<SupportBusinessSummary[]> => {
+    const result = await apiRequest<{ groups: SupportBusinessSummary[] }>('/api/support/groups', {
+      token: supportToken,
+    });
+    return result.groups;
+  };
+
+  // Logs this app instance into the chosen business as its admin — same effect as that admin
+  // logging in themself, so every existing page/feature just works with no special-casing.
+  const supportAccessBusiness = async (supportToken: string, groupCode: string): Promise<void> => {
+    const result = await apiRequest<{ token: string; user: AppUser; group: AppGroup }>(
+      '/api/support/impersonate',
+      { method: 'POST', body: { groupCode }, token: supportToken },
+    );
+    localStorage.setItem(TOKEN_KEY, result.token);
+    setUser(result.user);
+    setGroup(result.group);
+  };
+
+  // Freezes/unfreezes a business from the /support console — the target business's own devices
+  // hear about it via the SSE listener above; this call just needs to succeed for the support
+  // console's own list to update.
+  const supportSetFrozen = async (supportToken: string, groupCode: string, frozen: boolean): Promise<void> => {
+    await apiRequest<{ group: AppGroup }>('/api/support/set-frozen', {
+      method: 'POST', body: { groupCode, frozen }, token: supportToken,
+    });
+  };
+
+  // Sets (or clears, by passing null) this business's driver/admin seat caps and daily bill
+  // limit — enforced server-side at signup and bill creation, so this call is just how the
+  // support console's own list picks up the new values.
+  const supportSetLimits = async (
+    supportToken: string,
+    groupCode: string,
+    limits: { maxDrivers: number | null; maxAdmins: number | null; maxBillsPerDay: number | null },
+  ): Promise<void> => {
+    await apiRequest<{ group: AppGroup }>('/api/support/set-limits', {
+      method: 'POST', body: { groupCode, ...limits }, token: supportToken,
+    });
+  };
+
+  const forgotPassword = async (phone: string, groupCode: string): Promise<string> => {
+    const result = await apiRequest<{ message: string }>('/api/auth/forgot-password', {
+      method: 'POST',
+      body: { phone, groupCode },
+      token: null,
+    });
+    return result.message;
+  };
+
+  const verifyResetOtp = async (phone: string, groupCode: string, otp: string): Promise<void> => {
+    await apiRequest<{ ok: boolean }>('/api/auth/verify-reset-otp', {
+      method: 'POST',
+      body: { phone, groupCode, otp },
+      token: null,
+    });
+  };
+
+  const resetPassword = async (phone: string, groupCode: string, otp: string, newPassword: string): Promise<void> => {
+    await apiRequest<{ ok: boolean }>('/api/auth/reset-password', {
+      method: 'POST',
+      body: { phone, groupCode, otp, newPassword },
+      token: null,
+    });
+  };
+
+  const updateMyEmail = async (email: string): Promise<void> => {
+    const result = await apiRequest<{ user: AppUser }>('/api/me', { method: 'PATCH', body: { email } });
+    setUser(result.user);
+  };
+
+  const resetDriverPassword = async (driverId: string, newPassword: string): Promise<void> => {
+    await apiRequest<{ ok: boolean }>(`/api/drivers/${driverId}/reset-password`, {
+      method: 'POST',
+      body: { newPassword },
+    });
   };
 
   // ── Customer actions ───────────────────────────────────────────────────
@@ -390,6 +610,10 @@ export const AppProvider = ({ children }: AppProviderProps) => {
       ...tripData,
       amount: Number(tripData.amount) || 0,
       advanceAmount: Number(tripData.advanceAmount || 0),
+      // Generated once and carried through every attempt (this call and every offline-queue
+      // retry below) — lets the server recognize a retry of a submission that actually went
+      // through but whose response never reached this device, instead of creating a duplicate.
+      clientRequestId: generateClientRequestId(),
     };
     try {
       await apiRequest<{ trip: Trip }>('/api/trips', { method: 'POST', body });
@@ -425,6 +649,24 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     await refreshData();
   };
 
+  // A driver's ask for a change to a trip that's already approved (and so can't be edited
+  // directly anymore) — an admin reviews the message and applies it themself.
+  const requestTripEdit = async (tripId: string, message: string) => {
+    await apiRequest<{ request: TripEditRequest }>(`/api/trips/${tripId}/edit-requests`, {
+      method: 'POST',
+      body: { message },
+    });
+    await refreshData();
+  };
+
+  const resolveTripEditRequest = async (requestId: string, status: 'resolved' | 'dismissed') => {
+    await apiRequest<{ request: TripEditRequest }>(`/api/trip-edit-requests/${requestId}`, {
+      method: 'PATCH',
+      body: { status },
+    });
+    await refreshData();
+  };
+
   const approveTrip = async (tripId: string) => {
     await apiRequest<{ trip: Trip }>(`/api/trips/${tripId}/approve`, { method: 'POST' });
     await refreshData();
@@ -444,7 +686,7 @@ export const AppProvider = ({ children }: AppProviderProps) => {
 
   const recordTripPayment = async (
     tripId: string,
-    input: { amount?: number; fullyPaid?: boolean; fromAdvance?: boolean; paymentMode?: string },
+    input: { amount?: number; fullyPaid?: boolean; fromAdvance?: boolean; paymentMode?: string; note?: string },
   ) => {
     await apiRequest<{ trip: Trip }>(`/api/trips/${tripId}/payment`, {
       method: 'POST',
@@ -481,6 +723,17 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     return response.bill;
   };
 
+  // Checked before a bill is downloaded as a PDF or shared to WhatsApp — those never otherwise
+  // reach the server, so without this call they'd silently bypass the support-set daily bill
+  // limit that saving to My Bills already enforces. Throws (ApiError) if the group is at its cap;
+  // callers should stop before generating the document.
+  const checkBillGenerationLimit = async (customerId: string, method: 'pdf' | 'whatsapp'): Promise<void> => {
+    await apiRequest<{ ok: boolean }>('/api/bills/generation', {
+      method: 'POST',
+      body: { customerId, method },
+    });
+  };
+
   const deleteBill = async (billId: string) => {
     const response = await apiRequest<{ bill: SavedBill }>(`/api/bills/${billId}`, { method: 'DELETE' });
     setBills(prev => prev.map(b => (b.id === billId ? response.bill : b)));
@@ -499,6 +752,73 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     });
     await refreshData();
     return response;
+  };
+
+  // ── Vehicles & document-expiry reminders ────────────────────────────────
+  const addVehicle = async (vehicleNumber: string): Promise<Vehicle> => {
+    const response = await apiRequest<{ vehicle: Vehicle }>('/api/vehicles', {
+      method: 'POST',
+      body: { vehicleNumber },
+    });
+    setVehicles(prev => [...prev, response.vehicle].sort((a, b) => a.vehicleNumber.localeCompare(b.vehicleNumber)));
+    return response.vehicle;
+  };
+
+  const updateVehicle = async (vehicleId: string, vehicleNumber: string) => {
+    const response = await apiRequest<{ vehicle: Vehicle }>(`/api/vehicles/${vehicleId}`, {
+      method: 'PATCH',
+      body: { vehicleNumber },
+    });
+    setVehicles(prev => prev.map(v => (v.id === vehicleId ? response.vehicle : v)));
+  };
+
+  const deleteVehicle = async (vehicleId: string) => {
+    await apiRequest<{ ok: boolean }>(`/api/vehicles/${vehicleId}`, { method: 'DELETE' });
+    const removedDocIds = vehicles.find(v => v.id === vehicleId)?.documents.map(d => d.id) || [];
+    setVehicles(prev => prev.filter(v => v.id !== vehicleId));
+    if (removedDocIds.length) {
+      setDocNotifPrefs(prev => {
+        const next = { ...prev };
+        for (const docId of removedDocIds) delete next[docId];
+        return next;
+      });
+    }
+  };
+
+  const addVehicleDocument = async (
+    vehicleId: string,
+    input: { label: string; expiryDate: string; reminderDaysBefore?: number },
+  ) => {
+    const response = await apiRequest<{ vehicle: Vehicle }>(`/api/vehicles/${vehicleId}/documents`, {
+      method: 'POST',
+      body: input,
+    });
+    setVehicles(prev => prev.map(v => (v.id === vehicleId ? response.vehicle : v)));
+  };
+
+  const updateVehicleDocument = async (
+    vehicleId: string,
+    documentId: string,
+    updates: { label?: string; expiryDate?: string; reminderDaysBefore?: number },
+  ) => {
+    const response = await apiRequest<{ vehicle: Vehicle }>(`/api/vehicles/${vehicleId}/documents/${documentId}`, {
+      method: 'PATCH',
+      body: updates,
+    });
+    setVehicles(prev => prev.map(v => (v.id === vehicleId ? response.vehicle : v)));
+  };
+
+  const deleteVehicleDocument = async (vehicleId: string, documentId: string) => {
+    const response = await apiRequest<{ vehicle: Vehicle }>(`/api/vehicles/${vehicleId}/documents/${documentId}`, {
+      method: 'DELETE',
+    });
+    setVehicles(prev => prev.map(v => (v.id === vehicleId ? response.vehicle : v)));
+    setDocNotifPrefs(prev => {
+      if (!(documentId in prev)) return prev;
+      const next = { ...prev };
+      delete next[documentId];
+      return next;
+    });
   };
 
   // ── Notifications ───────────────────────────────────────────────────────
@@ -542,7 +862,11 @@ export const AppProvider = ({ children }: AppProviderProps) => {
       });
   };
 
-  const toggleThemeMode = () => setThemeMode(prev => (prev === 'light' ? 'dark' : 'light'));
+  const toggleThemeMode = () => setThemeMode(prev => {
+    const next = prev === 'light' ? 'dark' : 'light';
+    window.localStorage.setItem(THEME_MODE_KEY, next);
+    return next;
+  });
 
   return (
     <AppContext.Provider
@@ -556,14 +880,20 @@ export const AppProvider = ({ children }: AppProviderProps) => {
         addTrip, submitDriverTrip,
         pendingSyncCount, isSyncingOffline, flushPendingTrips,
         approveTrip, rejectTrip, updateTrip, recordTripPayment,
+        tripEditRequests, requestTripEdit, resolveTripEditRequest,
         getCustomerTrips, getFilteredTrips,
         searchCustomers, updateTripPaymentStatus,
         deleteCustomer,
         updateBranding, getNextInvoiceNumber, sendBillEmail,
-        bills, saveBill, deleteBill, permanentlyDeleteBill, restoreBackup,
+        bills, saveBill, checkBillGenerationLimit, deleteBill, permanentlyDeleteBill, restoreBackup,
+        vehicles, addVehicle, updateVehicle, deleteVehicle,
+        addVehicleDocument, updateVehicleDocument, deleteVehicleDocument,
+        activeDocumentReminders, snoozeDocumentReminder, dismissDocumentReminder,
         serverUrl, saveServerUrl,
         themeMode, toggleThemeMode,
         login, signup, logout,
+        supportLogin, supportListBusinesses, supportAccessBusiness, supportSetFrozen, supportSetLimits,
+        forgotPassword, verifyResetOtp, resetPassword, updateMyEmail, resetDriverPassword,
         refreshData,
       }}
     >

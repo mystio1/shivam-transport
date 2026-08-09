@@ -8,8 +8,9 @@ import {
   ListItemText,
   Typography,
   Divider,
+  useTheme,
 } from '@mui/material';
-import { Dashboard, People, AssignmentTurnedIn, Send, Settings, LocalShipping, AddCircle, ReceiptLong } from '@mui/icons-material';
+import { Dashboard, People, AssignmentTurnedIn, Send, Settings, LocalShipping, AddCircle, ReceiptLong, EventNote } from '@mui/icons-material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
 
@@ -23,7 +24,10 @@ interface SidebarProps {
 const Sidebar = ({ mobileOpen, handleDrawerToggle }: SidebarProps) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, pendingTrips, group } = useAppContext();
+  const theme = useTheme();
+  const { user, pendingTrips, group, activeDocumentReminders } = useAppContext();
+
+  const expiringDocsCount = activeDocumentReminders.length;
 
   const navItems =
     user?.role === 'admin'
@@ -38,6 +42,11 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }: SidebarProps) => {
             path: '/approvals',
           },
           { text: 'My Bills', icon: <ReceiptLong />, path: '/my-bills' },
+          {
+            text: `Document Reminders${expiringDocsCount ? ` (${expiringDocsCount})` : ''}`,
+            icon: <EventNote />,
+            path: '/document-reminders',
+          },
           { text: 'Bill Branding & Settings', icon: <Settings />, path: '/settings' },
         ]
       : [
@@ -51,21 +60,32 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }: SidebarProps) => {
 
   const drawerContent = (
     <>
-      <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <Box
+        sx={{
+          p: 3,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          // The drawer runs edge-to-edge on native, so its own top padding needs to clear a
+          // phone's notch/status bar on top of the normal 24px visual gap — resolves to plain
+          // 24px (no change) on anything without one.
+          pt: 'calc(24px + env(safe-area-inset-top))',
+        }}
+      >
         <Box 
           component="img"
           src="/logo.png"
           alt="Brand Logo"
           sx={{ width: '100%', maxWidth: 180, mb: 2, filter: 'drop-shadow(0px 4px 8px rgba(0,0,0,0.5))' }}
         />
-        <Typography variant="h6" sx={{ color: '#EAECEF', fontWeight: 800, textAlign: 'center', letterSpacing: '0.5px' }}>
+        <Typography variant="h6" sx={{ color: 'text.primary', fontWeight: 800, textAlign: 'center', letterSpacing: '0.5px' }}>
           SHIVAM
         </Typography>
         <Typography variant="caption" sx={{ color: '#F0B90B', fontWeight: 600, letterSpacing: '1px' }}>
           TRANSPORT
         </Typography>
       </Box>
-      <Divider sx={{ borderColor: '#2B3139' }} />
+      <Divider sx={{ borderColor: 'divider' }} />
       <List sx={{ px: 2, pt: 3 }}>
         {navItems.map((item) => {
           const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
@@ -76,7 +96,7 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }: SidebarProps) => {
                 sx={{
                   borderRadius: 2,
                   backgroundColor: isActive ? 'rgba(240, 185, 11, 0.1)' : 'transparent',
-                  color: isActive ? '#F0B90B' : '#848E9C',
+                  color: isActive ? '#F0B90B' : 'text.secondary',
                   '&:hover': {
                     backgroundColor: isActive ? 'rgba(240, 185, 11, 0.15)' : 'rgba(255,255,255,0.05)',
                   },
@@ -96,12 +116,12 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }: SidebarProps) => {
       </List>
       
       <Box sx={{ flexGrow: 1 }} />
-      <Box sx={{ p: 3 }}>
-        <Box sx={{ p: 2, borderRadius: 2, bgcolor: '#161A1E', border: '1px solid #2B3139', textAlign: 'center' }}>
-           <Typography variant="caption" sx={{ color: '#848E9C', display: 'block', mb: 1 }}>
+      <Box sx={{ p: 3, pb: 'calc(24px + env(safe-area-inset-bottom))' }}>
+        <Box sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper', border: `1px solid ${theme.palette.divider}`, textAlign: 'center' }}>
+           <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1 }}>
              Group Code
            </Typography>
-           <Typography variant="body2" sx={{ color: '#EAECEF', fontWeight: 600 }}>
+           <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 600 }}>
              {group?.code || user?.groupCode || 'LOGIN'}
            </Typography>
         </Box>
@@ -130,7 +150,7 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }: SidebarProps) => {
         sx={{
           display: 'block',
           [DESKTOP_QUERY]: { display: 'none' },
-          '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth, backgroundColor: '#0B0E11', borderRight: '1px solid #2B3139' },
+          '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth, backgroundColor: 'background.default', borderRight: `1px solid ${theme.palette.divider}` },
         }}
       >
         {drawerContent}
@@ -140,7 +160,7 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }: SidebarProps) => {
         sx={{
           display: 'none',
           [DESKTOP_QUERY]: { display: 'block' },
-          '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth, backgroundColor: '#0B0E11', borderRight: '1px solid #2B3139' },
+          '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth, backgroundColor: 'background.default', borderRight: `1px solid ${theme.palette.divider}` },
         }}
         open
       >

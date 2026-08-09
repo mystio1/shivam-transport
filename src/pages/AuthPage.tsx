@@ -2,20 +2,24 @@ import { useState } from 'react';
 import {
   Alert, Box, Button, Chip, Container, FormControl, FormControlLabel,
   InputLabel, MenuItem, Paper, Select, Stack, Switch, TextField, Typography,
-  IconButton, Tooltip, Accordion, AccordionSummary, AccordionDetails,
+  IconButton, Tooltip, Accordion, AccordionSummary, AccordionDetails, Link,
+  useTheme,
 } from '@mui/material';
 import { Lock, Login, PersonAdd, ContentCopy, Check, ExpandMore, Dns } from '@mui/icons-material';
 import { useAppContext } from '../context/AppContext';
 import type { SignupInput } from '../context/AppContext';
 import type { UserRole } from '../types';
+import ForgotPasswordDialog from '../components/ForgotPasswordDialog';
 
 const AuthPage = () => {
+  const theme = useTheme();
   const { login, signup, serverUrl, saveServerUrl } = useAppContext();
   const [isSignup, setIsSignup] = useState(false);
   const [role, setRole] = useState<UserRole>('admin');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('');
   const [groupCode, setGroupCode] = useState('');
   const [groupName, setGroupName] = useState('Shivam Transport');
   const [serverAddress, setServerAddress] = useState(serverUrl);
@@ -23,6 +27,7 @@ const AuthPage = () => {
   const [loading, setLoading] = useState(false);
   const [newGroupCode, setNewGroupCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
 
   const handleSubmit = async () => {
     setError('');
@@ -30,7 +35,7 @@ const AuthPage = () => {
     try {
       if (serverAddress.trim() !== serverUrl) saveServerUrl(serverAddress.trim());
       if (isSignup) {
-        const input: SignupInput = { name, phone, password, role, groupCode, groupName };
+        const input: SignupInput = { name, phone, password, role, groupCode, groupName, email };
         const result = await signup(input);
         if (result.groupCode) setNewGroupCode(result.groupCode);
       } else {
@@ -54,19 +59,30 @@ const AuthPage = () => {
   // Show group code screen after admin signup
   if (newGroupCode) {
     return (
-      <Box sx={{ minHeight: '100vh', bgcolor: '#0B0E11', display: 'flex', alignItems: 'center', py: 4 }}>
+      <Box
+        sx={{
+          minHeight: '100vh',
+          bgcolor: 'background.default',
+          display: 'flex',
+          alignItems: 'center',
+          // This screen has no Header/Layout chrome of its own to clear a notch/gesture bar, so
+          // it needs its own safe-area padding — resolves to plain 32px on anything without one.
+          pt: 'calc(32px + env(safe-area-inset-top))',
+          pb: 'calc(32px + env(safe-area-inset-bottom))',
+        }}
+      >
         <Container maxWidth="sm">
-          <Paper elevation={0} sx={{ p: { xs: 2.5, sm: 4 }, bgcolor: '#161A1E', border: '1px solid #2B3139', borderRadius: 2 }}>
+          <Paper elevation={0} sx={{ p: { xs: 2.5, sm: 4 }, bgcolor: 'background.paper', border: `1px solid ${theme.palette.divider}`, borderRadius: 2 }}>
             <Stack spacing={3}>
               <Box>
                 <Chip label="Account Created!" sx={{ bgcolor: 'rgba(14,203,129,0.12)', color: '#0ECB81', fontWeight: 700, mb: 2 }} />
-                <Typography variant="h5" sx={{ color: '#EAECEF', fontWeight: 800 }}>Share this Group Code with your Drivers</Typography>
-                <Typography sx={{ color: '#848E9C', mt: 0.5 }}>
+                <Typography variant="h5" sx={{ color: 'text.primary', fontWeight: 800 }}>Share this Group Code with your Drivers</Typography>
+                <Typography sx={{ color: 'text.secondary', mt: 0.5 }}>
                   Drivers must enter this code when signing up to join your transport group.
                 </Typography>
               </Box>
-              <Box sx={{ p: 3, bgcolor: '#0B0E11', border: '2px solid #F0B90B', borderRadius: 2, textAlign: 'center' }}>
-                <Typography variant="caption" sx={{ color: '#848E9C', display: 'block', mb: 1, letterSpacing: 2 }}>
+              <Box sx={{ p: 3, bgcolor: 'background.default', border: '2px solid #F0B90B', borderRadius: 2, textAlign: 'center' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1, letterSpacing: 2 }}>
                   YOUR GROUP CODE
                 </Typography>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
@@ -87,7 +103,7 @@ const AuthPage = () => {
                 variant="contained"
                 size="large"
                 onClick={() => setNewGroupCode(null)}
-                sx={{ color: '#0B0E11', fontWeight: 800 }}
+                sx={{ color: 'primary.contrastText', fontWeight: 800 }}
               >
                 Continue to Dashboard
               </Button>
@@ -99,14 +115,23 @@ const AuthPage = () => {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#0B0E11', display: 'flex', alignItems: 'center', py: 4 }}>
+    <Box
+      sx={{
+        minHeight: '100vh',
+        bgcolor: 'background.default',
+        display: 'flex',
+        alignItems: 'center',
+        pt: 'calc(32px + env(safe-area-inset-top))',
+        pb: 'calc(32px + env(safe-area-inset-bottom))',
+      }}
+    >
       <Container maxWidth="sm">
-        <Paper elevation={0} sx={{ p: { xs: 2.5, sm: 4 }, bgcolor: '#161A1E', border: '1px solid #2B3139', borderRadius: 2 }}>
+        <Paper elevation={0} sx={{ p: { xs: 2.5, sm: 4 }, bgcolor: 'background.paper', border: `1px solid ${theme.palette.divider}`, borderRadius: 2 }}>
           <Stack spacing={3}>
             <Box>
               <Chip label="Laptop Server Mode" sx={{ bgcolor: 'rgba(240,185,11,0.12)', color: '#F0B90B', fontWeight: 700, mb: 2 }} />
               <Typography variant="h4" sx={{ color: '#F0B90B', fontWeight: 900 }}>Shivam Transport</Typography>
-              <Typography sx={{ color: '#848E9C', mt: 0.5 }}>
+              <Typography sx={{ color: 'text.secondary', mt: 0.5 }}>
                 {isSignup
                   ? role === 'admin'
                     ? 'Create an admin account. A group code will be generated for your drivers.'
@@ -120,7 +145,7 @@ const AuthPage = () => {
             <FormControlLabel
               control={<Switch checked={isSignup} onChange={e => { setIsSignup(e.target.checked); setError(''); }} />}
               label={isSignup ? 'Create account' : 'Login to existing account'}
-              sx={{ color: '#EAECEF' }}
+              sx={{ color: 'text.primary' }}
             />
 
             {isSignup && (
@@ -181,11 +206,35 @@ const AuthPage = () => {
               fullWidth
             />
 
-            <Accordion sx={{ bgcolor: '#0B0E11', border: '1px solid #2B3139', '&:before': { display: 'none' } }}>
-              <AccordionSummary expandIcon={<ExpandMore sx={{ color: '#848E9C' }} />}>
+            {isSignup && role === 'admin' && (
+              <TextField
+                label="Recovery Email (optional)"
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                helperText="Lets you reset your password yourself if you forget it. Drivers don't need one — you can reset a driver's password for them from the Drivers page."
+                fullWidth
+              />
+            )}
+
+            {!isSignup && (
+              <Box sx={{ textAlign: 'right', mt: -1.5 }}>
+                <Link
+                  component="button"
+                  type="button"
+                  onClick={() => setForgotPasswordOpen(true)}
+                  sx={{ color: '#F0B90B', fontSize: '0.85rem' }}
+                >
+                  Forgot password?
+                </Link>
+              </Box>
+            )}
+
+            <Accordion sx={{ bgcolor: 'background.default', border: `1px solid ${theme.palette.divider}`, '&:before': { display: 'none' } }}>
+              <AccordionSummary expandIcon={<ExpandMore sx={{ color: 'text.secondary' }} />}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Dns sx={{ fontSize: 18, color: '#848E9C' }} />
-                  <Typography variant="body2" sx={{ color: '#848E9C' }}>Server Address (only if your admin gave you one)</Typography>
+                  <Dns sx={{ fontSize: 18, color: 'text.secondary' }} />
+                  <Typography variant="body2" sx={{ color: 'text.secondary' }}>Server Address (only if your admin gave you one)</Typography>
                 </Box>
               </AccordionSummary>
               <AccordionDetails>
@@ -207,12 +256,12 @@ const AuthPage = () => {
               startIcon={isSignup ? <PersonAdd /> : <Login />}
               onClick={handleSubmit}
               disabled={loading}
-              sx={{ color: '#0B0E11', fontWeight: 800 }}
+              sx={{ color: 'primary.contrastText', fontWeight: 800 }}
             >
               {loading ? 'Please wait...' : isSignup ? 'Create Account' : 'Login'}
             </Button>
 
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: '#848E9C' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'text.secondary' }}>
               <Lock fontSize="small" />
               <Typography variant="body2">
                 Data is stored on your office laptop server. Keep regular backups.
@@ -221,6 +270,12 @@ const AuthPage = () => {
           </Stack>
         </Paper>
       </Container>
+
+      <ForgotPasswordDialog
+        open={forgotPasswordOpen}
+        onClose={() => setForgotPasswordOpen(false)}
+        initialGroupCode={groupCode}
+      />
     </Box>
   );
 };

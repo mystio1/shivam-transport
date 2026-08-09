@@ -36,6 +36,7 @@ import {
   ListItemText,
 } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import {
   ArrowBack,
   Phone,
@@ -58,12 +59,14 @@ import {
   ExpandMore,
   Savings,
 } from '@mui/icons-material';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import type { Trip } from '../types';
 import { useAppContext } from '../context/AppContext';
 import TripList from '../components/TripList';
+import { DetailPageSkeleton } from '../components/Skeletons';
+import { renderBillNodeToA4Pdf } from '../utils/billPdf';
+import { shouldShowUpiQr } from '../utils/upiQrImage';
 import { findSimilarName } from '../utils/similarity';
+import { useFitPreviewToViewport } from '../hooks/useFitPreviewToViewport';
 
 // `Date.toISOString()` converts to UTC first, so late-evening local time (e.g. IST, UTC+5:30)
 // rolls over to "tomorrow" in UTC before slicing — a date <input> defaulting off of that shows
@@ -85,6 +88,7 @@ const CustomerDetails = () => {
     customers, getCustomerTrips, updateTripPaymentStatus, isLoading,
     branding, updateCustomer, getNextInvoiceNumber, sendBillEmail,
     addCustomerAdvance, deleteCustomerAdvance, permanentlyDeleteCustomerAdvance, mergeCustomer, saveBill,
+    checkBillGenerationLimit,
   } = useAppContext();
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const triedRedirect = useRef(false);
@@ -148,29 +152,29 @@ const CustomerDetails = () => {
   const [gstPercent, setGstPercent] = useState('');
   const [gstBillNoInput, setGstBillNoInput] = useState('');
   const [billTypeError, setBillTypeError] = useState('');
+  // Which payment status to include in the generated bill — asked alongside the GST/Non-GST
+  // choice. Defaults to "all" (both paid and unpaid trips), same as before this filter existed.
+  const [billPaymentFilter, setBillPaymentFilter] = useState<'all' | 'paid' | 'unpaid'>('all');
 
   // Ref for the bill section
   const billRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  const previewViewportRef = useRef<HTMLDivElement>(null);
+  const previewSizerRef = useRef<HTMLDivElement>(null);
+  // Only on the fullscreen mobile/native preview — on desktop the sheet already fits comfortably
+  // at its natural 194mm width, so this stays a no-op there.
+  useFitPreviewToViewport(
+    previewViewportRef, previewSizerRef, previewRef,
+    isPreviewOpen && (Capacitor.isNativePlatform() || isSmallScreen),
+  );
   const [sharingBill, setSharingBill] = useState(false);
   const [savingBillRecord, setSavingBillRecord] = useState(false);
 
   // Find customer by ID
-  console.log('CustomerDetails: id param =', id, 'customers =', customers);
-  console.log('isLoading:', isLoading);
   const customer = customers.find(c => c.id === id);
-  console.log('Found customer:', customer);
-  console.log('Customer ID from useParams:', id);
-  console.log('Customer object after find:', customer);
-  
+
   // If we have an ID but no customers loaded yet, don't redirect immediately
   const shouldShowLoading = id && (customers.length === 0 || isLoading) && !dataLoaded;
-
-  // Debug log when component mounts - keep this as the first useEffect
-  useEffect(() => {
-    console.log('CustomerDetails component mounted, id:', id);
-    console.log('Current customers in context:', customers);
-  }, [id, customers]);
   
   // Update the useEffect to set dataLoaded when customers are loaded
   useEffect(() => {
@@ -179,12 +183,8 @@ const CustomerDetails = () => {
     }
   }, [customers]);
 
-  // Improved redirect logic with better debugging
   useEffect(() => {
-    console.log('Redirect check - dataLoaded:', dataLoaded, 'customer:', customer, 'triedRedirect:', triedRedirect.current);
-    
     if (dataLoaded && !customer && !triedRedirect.current) {
-      console.log('Customer not found, redirecting to home');
       triedRedirect.current = true;
       navigate('/');
     }
@@ -230,20 +230,9 @@ const CustomerDetails = () => {
     navigate('/');
   };
 
-  console.log('CustomerDetails: Before rendering, customer is:', customer);
-  
-  // Show loading indicator if data is still loading
+  // Show a skeleton (not a blank "Loading..." message) while data is still loading
   if (shouldShowLoading) {
-    return (
-      <Box sx={{ py: 8, textAlign: 'center' }}>
-        <Typography variant="h5" gutterBottom>
-          Loading customer data...
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          Please wait while we retrieve the customer information.
-        </Typography>
-      </Box>
-    );
+    return <DetailPageSkeleton />;
   }
   
   // If customer not found, show error message
@@ -281,6 +270,14 @@ const CustomerDetails = () => {
         return true;
       })
     : allCustomerTrips;
+
+  // Trips that actually go into the generated bill — same date filter as above, further narrowed
+  // by the paid/unpaid choice made alongside GST/Non-GST. Kept separate from `customerTrips` so
+  // the page's own stat cards and Trip History list still show everything in the date range
+  // regardless of which subset is being billed right now.
+  const billTrips = billPaymentFilter === 'all'
+    ? customerTrips
+    : customerTrips.filter(trip => (billPaymentFilter === 'paid' ? trip.isPaid : !trip.isPaid));
 
   // Calculate statistics
   const totalTrips = customerTrips.length;
@@ -501,6 +498,10 @@ const CustomerDetails = () => {
   };
 
   const handleBillTypeContinue = async () => {
+    if (billTrips.length === 0) {
+      setBillTypeError('No trips match this date range and payment filter — adjust them to include at least one trip.');
+      return;
+    }
     if (billTypeChoice === 'non-gst') {
       setIsGstBill(false);
       setGstPercent('');
@@ -531,9 +532,9 @@ const CustomerDetails = () => {
 
   const buildBillText = () => {
     const company = branding?.companyName || 'Shivam Transport';
-    const totals = getBillTotals(customerTrips);
+    const totals = getBillTotals(billTrips);
     const lineBreak = '─'.repeat(40);
-    const tripLines = customerTrips.map((trip, i) =>
+    const tripLines = billTrips.map((trip, i) =>
       `${i + 1}. ${new Date(trip.date).toLocaleDateString('en-IN')} | ${trip.pickupLocation} → ${trip.dropLocation}\n   Amount: Rs.${trip.amount.toFixed(2)}  Paid: Rs.${(trip.paidAmount || 0).toFixed(2)}`
     ).join('\n');
     const phones = [branding?.phone1, branding?.phone2].filter(Boolean).join(' / ');
@@ -592,24 +593,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
   const generateBillPdfBlob = async (): Promise<Blob> => {
     const node = previewRef.current;
     if (!node) throw new Error('Bill preview is not ready yet');
-    const canvas = await html2canvas(node, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
-    const imgData = canvas.toDataURL('image/jpeg', 0.92);
-    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const imgHeight = (canvas.height * pageWidth) / canvas.width;
-
-    let heightLeft = imgHeight;
-    let position = 0;
-    pdf.addImage(imgData, 'JPEG', 0, position, pageWidth, imgHeight);
-    heightLeft -= pageHeight;
-    while (heightLeft > 0) {
-      position = heightLeft - imgHeight;
-      pdf.addPage();
-      pdf.addImage(imgData, 'JPEG', 0, position, pageWidth, imgHeight);
-      heightLeft -= pageHeight;
-    }
-    return pdf.output('blob');
+    return renderBillNodeToA4Pdf(node);
   };
 
   // WhatsApp button: shares the actual bill PDF (not a text summary) and, wherever the platform
@@ -619,6 +603,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
     setSharingBill(true);
     setDialogMessage(null);
     try {
+      if (customer) await checkBillGenerationLimit(customer.id, 'whatsapp');
       const blob = await generateBillPdfBlob();
       const fileName = `Invoice-${customer?.name || 'Bill'}.pdf`;
       const file = new File([blob], fileName, { type: 'application/pdf' });
@@ -682,6 +667,10 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
     const footerNote = branding?.footerNote || 'Thank you for your business!';
     const logoUrl = branding?.logoDataUrl || '';
     const signatureUrl = branding?.signatureDataUrl || '';
+    const headerLeftUrl = branding?.headerLeftImageDataUrl || '';
+    const headerRightUrl = branding?.headerRightImageDataUrl || '';
+    const showUpiQr = shouldShowUpiQr(branding, isGstBill);
+    const upiQrUrl = branding?.upiQrImageDataUrl || '';
 
     const rowsHtml = tripsForBill.map((trip, index) => {
       const bg = index % 2 === 0 ? '#fff' : '#fdf6f0';
@@ -742,7 +731,12 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
       .page > * { position:relative; z-index:1; }
       /* header */
       .accent-bar { height:4px; background:${accentColor}; margin-bottom:16px; }
-      .header { text-align:center; padding-bottom:14px; margin-bottom:16px; border-bottom:3px double #CBD5E1; }
+      .header { display:flex; align-items:center; justify-content:center; gap:10px; padding-bottom:14px; margin-bottom:16px; border-bottom:3px double #CBD5E1; }
+      /* Fixed, identical size for both slots — whether one, both, or neither is set, the company
+         name in the middle stays centered instead of drifting toward whichever side is empty. */
+      .header-image-slot { flex:0 0 30mm; width:30mm; height:22.5mm; display:flex; align-items:center; justify-content:center; }
+      .header-image-slot img { max-width:100%; max-height:100%; object-fit:contain; }
+      .header-text { flex:1; text-align:center; min-width:0; }
       .company-name { font-size:24pt; font-weight:800; letter-spacing:0.5px; text-transform:uppercase; color:${primaryColor}; }
       .tagline { font-size:9.5pt; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#8a8a8a; margin-top:4px; }
       .contact-line { font-size:9pt; color:#555; margin-top:6px; font-weight:500; }
@@ -767,9 +761,14 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
       .grand-total-row td { background:#F1F1F1; color:#1a1a1a; font-weight:800; }
       .advance-row td { background:#FFF9E6; color:#7A5A00; font-weight:700; }
       .net-row td { background:#EBF5EC; color:#0B5E1F; font-weight:900; font-size:10pt; }
-      /* amount in words */
-      .words-box { margin-bottom:16px; padding:8px 10px; background:#fcfcfc; border:1px dashed #ddd; border-radius:4px; font-size:9pt; color:#555; }
+      /* amount in words (+ optional UPI QR to its right) */
+      .words-row { display:flex; gap:14px; align-items:flex-start; margin-bottom:16px; }
+      .words-col { flex:1; min-width:0; }
+      .words-box { margin-bottom:8px; padding:8px 10px; background:#fcfcfc; border:1px dashed #ddd; border-radius:4px; font-size:9pt; color:#555; }
+      .words-box:last-child { margin-bottom:0; }
       .words-box b { color:#1a1a1a; }
+      .upi-qr-box { flex:0 0 90px; width:90px; height:90px; display:flex; align-items:center; justify-content:center; }
+      .upi-qr-box img { max-width:100%; max-height:100%; object-fit:contain; }
       /* bank + signature footer */
       .footer-row { display:flex; gap:24px; border-top:2px double #CBD5E1; padding-top:14px; font-size:9pt; color:#444; }
       .bank-col { flex:1; }
@@ -803,10 +802,14 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
 <div class="page">
   <div class="accent-bar"></div>
   <div class="header">
-    <div class="company-name">${printValue(companyName)}</div>
-    <div class="tagline">${printValue(tagline)}</div>
-    ${contactLine ? `<div class="contact-line">${contactLine}</div>` : ''}
-    ${addressLine ? `<div class="address-line">${printValue(addressLine)}</div>` : ''}
+    <div class="header-image-slot">${headerLeftUrl ? `<img src="${headerLeftUrl}" alt="" />` : ''}</div>
+    <div class="header-text">
+      <div class="company-name">${printValue(companyName)}</div>
+      <div class="tagline">${printValue(tagline)}</div>
+      ${contactLine ? `<div class="contact-line">${contactLine}</div>` : ''}
+      ${addressLine ? `<div class="address-line">${printValue(addressLine)}</div>` : ''}
+    </div>
+    <div class="header-image-slot">${headerRightUrl ? `<img src="${headerRightUrl}" alt="" />` : ''}</div>
   </div>
 
   <div class="info-grid">
@@ -848,8 +851,13 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
     </tfoot>
   </table>
 
-  <div class="words-box"><b>Amount in Words:</b> ${printValue(amountWords)}</div>
-  ${totals.advanceApplied > 0 ? `<div class="words-box" style="margin-top:-10px;"><b>Advance Balance Remaining:</b> ₹${printValue((totals.advanceAvailable - totals.advanceApplied).toFixed(2))}</div>` : ''}
+  <div class="words-row">
+    <div class="words-col">
+      <div class="words-box"><b>Amount in Words:</b> ${printValue(amountWords)}</div>
+      ${totals.advanceApplied > 0 ? `<div class="words-box"><b>Advance Balance Remaining:</b> ₹${printValue((totals.advanceAvailable - totals.advanceApplied).toFixed(2))}</div>` : ''}
+    </div>
+    ${showUpiQr ? `<div class="upi-qr-box"><img src="${upiQrUrl}" alt="UPI QR" /></div>` : ''}
+  </div>
 
   <div class="footer-row">
     <div class="bank-col">
@@ -896,12 +904,19 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
     }
   };
 
-  const handlePrintBill = () => {
+  const handlePrintBill = async () => {
+    setDialogMessage(null);
+    try {
+      if (customer) await checkBillGenerationLimit(customer.id, 'pdf');
+    } catch (error) {
+      setDialogMessage({ type: 'error', text: error instanceof Error ? error.message : 'Could not generate the bill' });
+      return;
+    }
     const formattedBillDate = billDate
       ? new Date(billDate).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })
       : new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const totals = getBillTotals(customerTrips);
-    const html = buildBillHtml(customerTrips, {
+    const totals = getBillTotals(billTrips);
+    const html = buildBillHtml(billTrips, {
       billNoLabel: billNo || '01',
       billDateLabel: formattedBillDate,
       totals,
@@ -941,7 +956,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
     setSavingBillRecord(true);
     setDialogMessage(null);
     try {
-      const totals = getBillTotals(customerTrips);
+      const totals = getBillTotals(billTrips);
       const finalNetPayable = totals.showBreakdown ? totals.netPayable : totals.subTotal;
       await saveBill({
         customerId: customer.id,
@@ -957,7 +972,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
         advanceApplied: totals.advanceApplied,
         netPayable: finalNetPayable,
         amountInWords: amountInWords.trim() || `${convertNumberToWords(Math.round(finalNetPayable))} Rupees Only`,
-        trips: customerTrips.map(t => ({
+        trips: billTrips.map(t => ({
           tripId: t.id,
           date: t.date,
           pickupLocation: t.pickupLocation,
@@ -994,13 +1009,13 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
         console.error('Share failed:', err);
       }
     } else {
-      handlePrintBill();
+      await handlePrintBill();
     }
   };
 
   // Single source of truth for the bill totals shown across the collapsed Billing Preview,
   // the Invoice Preview dialog, and (via buildBillHtml) the printed/PDF version.
-  const billTotals = getBillTotals(customerTrips);
+  const billTotals = getBillTotals(billTrips);
 
   // Advance history, newest first — deleted entries are kept as a read-only record (soft delete)
   // and shown separately so they no longer count toward the balance but aren't lost either.
@@ -1094,8 +1109,8 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
           p: 3,
           mb: 4,
           borderRadius: 2,
-          background: '#161A1E',
-          border: '1px solid #2B3139',
+          background: theme.palette.background.paper,
+          border: `1px solid ${theme.palette.divider}`,
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -1106,28 +1121,28 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
                 gutterBottom
                 sx={{
                   fontWeight: 700,
-                  color: '#EAECEF',
+                  color: 'text.primary',
                   mb: 0,
                 }}
               >
                 {customer.name}
               </Typography>
               <Tooltip title="Edit name / phone / address">
-                <IconButton size="small" onClick={openEditCustomer} sx={{ color: '#848E9C', '&:hover': { color: '#F0B90B' } }}>
+                <IconButton size="small" onClick={openEditCustomer} sx={{ color: 'text.secondary', '&:hover': { color: '#F0B90B' } }}>
                   <Edit fontSize="small" />
                 </IconButton>
               </Tooltip>
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
               <Phone sx={{ fontSize: 20, mr: 1, color: '#F0B90B' }} />
-              <Typography variant="body1" sx={{ color: '#848E9C' }}>
+              <Typography variant="body1" sx={{ color: 'text.secondary' }}>
                 {customer.phone || 'No phone number'}
               </Typography>
             </Box>
             {customer.address && (
               <Box sx={{ display: 'flex', alignItems: 'flex-start', mt: 1 }}>
                 <LocationOn sx={{ fontSize: 20, mr: 1, mt: 0.5, color: '#0ECB81' }} />
-                <Typography variant="body1" sx={{ color: '#848E9C' }}>
+                <Typography variant="body1" sx={{ color: 'text.secondary' }}>
                   {customer.address}
                 </Typography>
               </Box>
@@ -1155,12 +1170,12 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
         </Box>
 
         {/* Advance balance — money the customer has already paid ahead of any specific trip */}
-        <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid #2B3139', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
+        <Box sx={{ mt: 2, pt: 2, borderTop: `1px solid ${theme.palette.divider}`, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
           <Savings sx={{ color: '#F0B90B', fontSize: 20 }} />
-          <Typography variant="body2" sx={{ color: '#848E9C' }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
             Advance Balance:
           </Typography>
-          <Typography variant="subtitle1" sx={{ fontWeight: 800, color: (customer.advanceBalance || 0) > 0 ? '#0ECB81' : '#EAECEF' }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 800, color: (customer.advanceBalance || 0) > 0 ? '#0ECB81' : 'text.primary' }}>
             ₹{(customer.advanceBalance || 0).toFixed(2)}
           </Typography>
           <Button
@@ -1178,10 +1193,10 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
     expand it when you're actually ready to prep a bill for this customer. */}
 <Accordion
   disableGutters
-  sx={{ mb: 4, bgcolor: '#161A1E', border: '1px solid #2B3139', borderRadius: 2, '&:before': { display: 'none' } }}
+  sx={{ mb: 4, bgcolor: 'background.paper', border: `1px solid ${theme.palette.divider}`, borderRadius: 2, '&:before': { display: 'none' } }}
 >
-  <AccordionSummary expandIcon={<ExpandMore sx={{ color: '#848E9C' }} />}>
-    <Typography sx={{ display: 'flex', alignItems: 'center', color: '#EAECEF', fontWeight: 700 }}>
+  <AccordionSummary expandIcon={<ExpandMore sx={{ color: 'text.secondary' }} />}>
+    <Typography sx={{ display: 'flex', alignItems: 'center', color: 'text.primary', fontWeight: 700 }}>
       <Receipt sx={{ mr: 1, color: '#F0B90B' }} />
       Billing Details
     </Typography>
@@ -1193,13 +1208,13 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
     sx={{
       p: 3,
       mb: 3,
-      bgcolor: '#1E2329',
+      bgcolor: 'action.hover',
       borderRadius: 2,
       border: '1px solid',
-      borderColor: '#2B3139',
+      borderColor: 'divider',
     }}
   >
-    <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', mb: 2, color: '#EAECEF', fontWeight: 600 }}>
+    <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', mb: 2, color: 'text.primary', fontWeight: 600 }}>
       <Receipt sx={{ mr: 1, color: '#F0B90B' }} />
       Bill Inputs
     </Typography>
@@ -1261,7 +1276,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
               </Select>
             </FormControl>
             {(bankName || branch || accountNumber || ifscCode) && (
-              <Typography variant="body2" sx={{ color: '#848E9C', mt: 1 }}>
+              <Typography variant="body2" sx={{ color: 'text.secondary', mt: 1 }}>
                 {[bankName, branch, accountNumber, ifscCode].filter(Boolean).join(' · ')}
               </Typography>
             )}
@@ -1316,88 +1331,97 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
 
   <Paper
     elevation={0}
-    sx={{ p: 3, borderRadius: 2, border: '1px solid', borderColor: '#2B3139', bgcolor: '#161A1E' }}
+    sx={{ p: 3, borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}
   >
     <Box sx={{ mb: 3, display: 'flex', flexDirection: 'column', gap: 1 }}>
-      <Typography variant="h5" sx={{ fontWeight: 700, color: '#EAECEF' }}>Billing Preview</Typography>
-      <Typography variant="body2" sx={{ color: '#848E9C' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+        <Typography variant="h5" sx={{ fontWeight: 700, color: 'text.primary' }}>Billing Preview</Typography>
+        {billPaymentFilter !== 'all' && (
+          <Chip
+            size="small"
+            label={billPaymentFilter === 'paid' ? 'Paid trips only' : 'Unpaid trips only'}
+            sx={{ fontWeight: 700, backgroundColor: 'rgba(240, 185, 11, 0.1)', color: '#F0B90B' }}
+          />
+        )}
+      </Box>
+      <Typography variant="body2" sx={{ color: 'text.secondary' }}>
         The printed bill will use these columns: Date, From, To, Advance, Amount, Status.
       </Typography>
     </Box>
 
     <Box sx={{ mb: 3 }}>
-      <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1, color: '#EAECEF' }}>Customer</Typography>
-      <Typography variant="body2" sx={{ color: '#848E9C' }}><strong>Name:</strong> <span style={{ color: '#EAECEF' }}>{customer.name}</span></Typography>
-      <Typography variant="body2" sx={{ color: '#848E9C' }}><strong>Phone:</strong> <span style={{ color: '#EAECEF' }}>{customer.phone || 'N/A'}</span></Typography>
-      <Typography variant="body2" sx={{ color: '#848E9C' }}><strong>Address:</strong> <span style={{ color: '#EAECEF' }}>{customer.address || 'N/A'}</span></Typography>
+      <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1, color: 'text.primary' }}>Customer</Typography>
+      <Typography variant="body2" sx={{ color: 'text.secondary' }}><strong>Name:</strong> <span style={{ color: theme.palette.text.primary }}>{customer.name}</span></Typography>
+      <Typography variant="body2" sx={{ color: 'text.secondary' }}><strong>Phone:</strong> <span style={{ color: theme.palette.text.primary }}>{customer.phone || 'N/A'}</span></Typography>
+      <Typography variant="body2" sx={{ color: 'text.secondary' }}><strong>Address:</strong> <span style={{ color: theme.palette.text.primary }}>{customer.address || 'N/A'}</span></Typography>
     </Box>
 
     <Box component="div" sx={{ width: '100%', mt: 2, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-      <table style={{ width: '100%', minWidth: '500px', borderCollapse: 'collapse', fontSize: '0.93rem', color: '#EAECEF' }}>
+      <table style={{ width: '100%', minWidth: '500px', borderCollapse: 'collapse', fontSize: '0.93rem', color: theme.palette.text.primary }}>
         <thead>
           <tr>
-            <th style={{ padding: '10px', borderBottom: '2px solid #2B3139', textAlign: 'left', width: '15%' }}>Date</th>
-            <th style={{ padding: '10px', borderBottom: '2px solid #2B3139', textAlign: 'left', width: '22%' }}>From</th>
-            <th style={{ padding: '10px', borderBottom: '2px solid #2B3139', textAlign: 'left', width: '23%' }}>To</th>
-            <th style={{ padding: '10px', borderBottom: '2px solid #2B3139', textAlign: 'right', width: '14%' }}>Paid</th>
-            <th style={{ padding: '10px', borderBottom: '2px solid #2B3139', textAlign: 'right', width: '14%' }}>Amount</th>
-            <th style={{ padding: '10px', borderBottom: '2px solid #2B3139', textAlign: 'center', width: '12%' }}>Status</th>
+            <th style={{ padding: '10px', borderBottom: `2px solid ${theme.palette.divider}`, textAlign: 'left', width: '15%' }}>Date</th>
+            <th style={{ padding: '10px', borderBottom: `2px solid ${theme.palette.divider}`, textAlign: 'left', width: '22%' }}>From</th>
+            <th style={{ padding: '10px', borderBottom: `2px solid ${theme.palette.divider}`, textAlign: 'left', width: '23%' }}>To</th>
+            <th style={{ padding: '10px', borderBottom: `2px solid ${theme.palette.divider}`, textAlign: 'right', width: '14%' }}>Paid</th>
+            <th style={{ padding: '10px', borderBottom: `2px solid ${theme.palette.divider}`, textAlign: 'right', width: '14%' }}>Amount</th>
+            <th style={{ padding: '10px', borderBottom: `2px solid ${theme.palette.divider}`, textAlign: 'center', width: '12%' }}>Status</th>
           </tr>
         </thead>
         <tbody>
-          {customerTrips.map((trip, idx) => (
-            <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#1E2329' : '#161A1E' }}>
-              <td style={{ padding: '10px', borderBottom: '1px solid #2B3139' }}>{new Date(trip.date).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: '2-digit' })}</td>
-              <td style={{ padding: '10px', borderBottom: '1px solid #2B3139' }}>{trip.pickupLocation}</td>
-              <td style={{ padding: '10px', borderBottom: '1px solid #2B3139' }}>{trip.dropLocation}</td>
-              <td style={{ padding: '10px', borderBottom: '1px solid #2B3139', textAlign: 'right' }}>₹{(trip.paidAmount || 0).toFixed(2)}</td>
-              <td style={{ padding: '10px', borderBottom: '1px solid #2B3139', textAlign: 'right' }}>₹{trip.amount.toFixed(2)}</td>
-              <td style={{ padding: '10px', borderBottom: '1px solid #2B3139', textAlign: 'center', color: trip.isPaid ? '#0ECB81' : '#F6465D' }}>{trip.isPaid ? 'Paid' : 'Pending'}</td>
+          {billTrips.map((trip, idx) => (
+            <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? theme.palette.action.hover : theme.palette.background.paper }}>
+              <td style={{ padding: '10px', borderBottom: `1px solid ${theme.palette.divider}` }}>{new Date(trip.date).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: '2-digit' })}</td>
+              <td style={{ padding: '10px', borderBottom: `1px solid ${theme.palette.divider}` }}>{trip.pickupLocation}</td>
+              <td style={{ padding: '10px', borderBottom: `1px solid ${theme.palette.divider}` }}>{trip.dropLocation}</td>
+              <td style={{ padding: '10px', borderBottom: `1px solid ${theme.palette.divider}`, textAlign: 'right' }}>₹{(trip.paidAmount || 0).toFixed(2)}</td>
+              <td style={{ padding: '10px', borderBottom: `1px solid ${theme.palette.divider}`, textAlign: 'right' }}>₹{trip.amount.toFixed(2)}</td>
+              <td style={{ padding: '10px', borderBottom: `1px solid ${theme.palette.divider}`, textAlign: 'center', color: trip.isPaid ? '#0ECB81' : '#F6465D' }}>{trip.isPaid ? 'Paid' : 'Pending'}</td>
             </tr>
           ))}
           <tr>
-            <td colSpan={3} style={{ padding: '10px', fontWeight: 700, textAlign: 'right', borderTop: '2px solid #2B3139', color: '#F0B90B' }}>Sub Total</td>
-            <td style={{ padding: '10px', fontWeight: 700, textAlign: 'right', borderTop: '2px solid #2B3139', color: '#F0B90B' }}>₹{billTotals.received.toFixed(2)}</td>
-            <td style={{ padding: '10px', fontWeight: 700, textAlign: 'right', borderTop: '2px solid #2B3139', color: '#F0B90B' }}>₹{billTotals.subTotal.toFixed(2)}</td>
-            <td style={{ padding: '10px', borderTop: '2px solid #2B3139' }} />
+            <td colSpan={3} style={{ padding: '10px', fontWeight: 700, textAlign: 'right', borderTop: `2px solid ${theme.palette.divider}`, color: '#F0B90B' }}>Sub Total</td>
+            <td style={{ padding: '10px', fontWeight: 700, textAlign: 'right', borderTop: `2px solid ${theme.palette.divider}`, color: '#F0B90B' }}>₹{billTotals.received.toFixed(2)}</td>
+            <td style={{ padding: '10px', fontWeight: 700, textAlign: 'right', borderTop: `2px solid ${theme.palette.divider}`, color: '#F0B90B' }}>₹{billTotals.subTotal.toFixed(2)}</td>
+            <td style={{ padding: '10px', borderTop: `2px solid ${theme.palette.divider}` }} />
           </tr>
           {billTotals.discount > 0 && (
-            <tr style={{ backgroundColor: '#3A1414' }}>
+            <tr style={{ backgroundColor: alpha('#F6465D', theme.palette.mode === 'dark' ? 0.14 : 0.08) }}>
               <td colSpan={4} style={{ padding: '10px', fontWeight: 700, textAlign: 'right', color: '#F6465D' }}>Discount</td>
               <td style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: '#F6465D' }}>- ₹{billTotals.discount.toFixed(2)}</td>
               <td />
             </tr>
           )}
           {billTotals.gstEnabled && (
-            <tr style={{ backgroundColor: '#0F2038' }}>
+            <tr style={{ backgroundColor: alpha('#58A6FF', theme.palette.mode === 'dark' ? 0.14 : 0.08) }}>
               <td colSpan={4} style={{ padding: '10px', fontWeight: 700, textAlign: 'right', color: '#58A6FF' }}>GST ({billTotals.gstPct}%)</td>
               <td style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: '#58A6FF' }}>+ ₹{billTotals.gstAmount.toFixed(2)}</td>
               <td />
             </tr>
           )}
           {(billTotals.discount > 0 || billTotals.gstEnabled) && (
-            <tr style={{ backgroundColor: '#20242B' }}>
-              <td colSpan={4} style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: '#EAECEF' }}>Grand Total</td>
-              <td style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: '#EAECEF' }}>₹{billTotals.grandTotal.toFixed(2)}</td>
+            <tr style={{ backgroundColor: theme.palette.action.hover }}>
+              <td colSpan={4} style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: theme.palette.text.primary }}>Grand Total</td>
+              <td style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: theme.palette.text.primary }}>₹{billTotals.grandTotal.toFixed(2)}</td>
               <td />
             </tr>
           )}
           {billTotals.received > 0 && (
-            <tr style={{ backgroundColor: '#2A2500' }}>
-              <td colSpan={4} style={{ padding: '10px', fontWeight: 700, textAlign: 'right', color: '#C8A200' }}>Less: Amount Received</td>
-              <td style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: '#C8A200' }}>- ₹{billTotals.received.toFixed(2)}</td>
+            <tr style={{ backgroundColor: alpha('#F0B90B', theme.palette.mode === 'dark' ? 0.14 : 0.08) }}>
+              <td colSpan={4} style={{ padding: '10px', fontWeight: 700, textAlign: 'right', color: theme.palette.mode === 'dark' ? '#C8A200' : '#7A5A00' }}>Less: Amount Received</td>
+              <td style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: theme.palette.mode === 'dark' ? '#C8A200' : '#7A5A00' }}>- ₹{billTotals.received.toFixed(2)}</td>
               <td />
             </tr>
           )}
           {billTotals.advanceApplied > 0 && (
-            <tr style={{ backgroundColor: '#2A2500' }}>
-              <td colSpan={4} style={{ padding: '10px', fontWeight: 700, textAlign: 'right', color: '#C8A200' }}>Less: Advance Balance Applied</td>
-              <td style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: '#C8A200' }}>- ₹{billTotals.advanceApplied.toFixed(2)}</td>
+            <tr style={{ backgroundColor: alpha('#F0B90B', theme.palette.mode === 'dark' ? 0.14 : 0.08) }}>
+              <td colSpan={4} style={{ padding: '10px', fontWeight: 700, textAlign: 'right', color: theme.palette.mode === 'dark' ? '#C8A200' : '#7A5A00' }}>Less: Advance Balance Applied</td>
+              <td style={{ padding: '10px', fontWeight: 800, textAlign: 'right', color: theme.palette.mode === 'dark' ? '#C8A200' : '#7A5A00' }}>- ₹{billTotals.advanceApplied.toFixed(2)}</td>
               <td />
             </tr>
           )}
           {billTotals.showBreakdown && (
-            <tr style={{ backgroundColor: '#0D2A1A' }}>
+            <tr style={{ backgroundColor: alpha('#0ECB81', theme.palette.mode === 'dark' ? 0.14 : 0.08) }}>
               <td colSpan={4} style={{ padding: '10px', fontWeight: 900, textAlign: 'right', color: '#0ECB81', fontSize: '1rem' }}>NET PAYABLE</td>
               <td style={{ padding: '10px', fontWeight: 900, textAlign: 'right', color: '#0ECB81', fontSize: '1rem' }}>₹{billTotals.netPayable.toFixed(2)}</td>
               <td />
@@ -1406,12 +1430,21 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
         </tbody>
       </table>
     </Box>
-    <Typography variant="body2" sx={{ mt: 2, fontWeight: 600, color: '#EAECEF' }}>Amount in words: <span style={{ color: '#848E9C' }}>{amountInWords.trim() || `${convertNumberToWords(Math.round(billTotals.showBreakdown ? billTotals.netPayable : billTotals.subTotal))} Rupees Only`}</span></Typography>
-    {billTotals.advanceApplied > 0 && (
-      <Typography variant="body2" sx={{ mt: 1, color: '#848E9C' }}>
-        Advance balance remaining after this bill: <span style={{ color: '#0ECB81', fontWeight: 700 }}>₹{(billTotals.advanceAvailable - billTotals.advanceApplied).toFixed(2)}</span>
-      </Typography>
-    )}
+    <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', mt: 2 }}>
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>Amount in words: <span style={{ color: theme.palette.text.secondary }}>{amountInWords.trim() || `${convertNumberToWords(Math.round(billTotals.showBreakdown ? billTotals.netPayable : billTotals.subTotal))} Rupees Only`}</span></Typography>
+        {billTotals.advanceApplied > 0 && (
+          <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
+            Advance balance remaining after this bill: <span style={{ color: '#0ECB81', fontWeight: 700 }}>₹{(billTotals.advanceAvailable - billTotals.advanceApplied).toFixed(2)}</span>
+          </Typography>
+        )}
+      </Box>
+      {shouldShowUpiQr(branding, isGstBill) && (
+        <Box sx={{ flex: '0 0 90px', width: 90, height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#fff', borderRadius: 1 }}>
+          <Box component="img" src={branding?.upiQrImageDataUrl} alt="UPI QR" sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+        </Box>
+      )}
+    </Box>
   </Paper>
 </Box>
   </AccordionDetails>
@@ -1423,8 +1456,8 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
         sx={{
           p: { xs: 2, sm: 3 },
           borderRadius: 2,
-          background: '#161A1E',
-          border: '1px solid #2B3139',
+          background: theme.palette.background.paper,
+          border: `1px solid ${theme.palette.divider}`,
           display: 'flex',
           flexWrap: 'wrap',
           alignItems: 'center',
@@ -1433,7 +1466,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: '#F0B90B', fontWeight: 700, mr: 1 }}>
           <FilterAlt fontSize="small" />
-          <Typography sx={{ fontWeight: 700, color: '#EAECEF' }}>Filter by trip date</Typography>
+          <Typography sx={{ fontWeight: 700, color: 'text.primary' }}>Filter by trip date</Typography>
         </Box>
         <TextField
           label="From"
@@ -1463,13 +1496,13 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
               size="small"
               startIcon={<Clear />}
               onClick={() => { setTripFilterFrom(''); setTripFilterTo(''); }}
-              sx={{ color: '#848E9C' }}
+              sx={{ color: 'text.secondary' }}
             >
               Clear
             </Button>
           </>
         )}
-        <Typography variant="body2" sx={{ color: '#848E9C', width: '100%' }}>
+        <Typography variant="body2" sx={{ color: 'text.secondary', width: '100%' }}>
           This also controls which trips are included when you view or print the bill below.
         </Typography>
       </Paper>
@@ -1480,18 +1513,18 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
           <Card sx={{
             height: '100%',
             borderRadius: 2,
-            background: '#161A1E',
-            borderTop: '3px solid #2B3139',
-            color: '#EAECEF',
+            background: theme.palette.background.paper,
+            borderTop: `3px solid ${theme.palette.divider}`,
+            color: 'text.primary',
             boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
             transition: 'transform 0.3s, box-shadow 0.3s',
             '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 8px 24px rgba(255, 255, 255, 0.05)' },
           }}>
             <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
-              <Typography gutterBottom sx={{ color: '#848E9C', fontWeight: 600, fontSize: { xs: '0.7rem', sm: '1rem' } }}>
+              <Typography gutterBottom sx={{ color: 'text.secondary', fontWeight: 600, fontSize: { xs: '0.7rem', sm: '1rem' } }}>
                 Total Trips
               </Typography>
-              <Typography sx={{ color: '#EAECEF', fontWeight: 800, fontSize: { xs: '1.3rem', sm: '2.2rem' } }}>{totalTrips}</Typography>
+              <Typography sx={{ color: 'text.primary', fontWeight: 800, fontSize: { xs: '1.3rem', sm: '2.2rem' } }}>{totalTrips}</Typography>
             </CardContent>
           </Card>
         </Grid>
@@ -1499,16 +1532,16 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
           <Card sx={{
             height: '100%',
             borderRadius: 2,
-            background: '#161A1E',
+            background: theme.palette.background.paper,
             borderTop: '3px solid #0ECB81',
-            color: '#EAECEF',
+            color: 'text.primary',
             boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
             transition: 'transform 0.3s, box-shadow 0.3s',
             '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 8px 24px rgba(14, 203, 129, 0.15)' },
           }}>
             <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
-              <Typography gutterBottom sx={{ color: '#848E9C', fontWeight: 600, fontSize: { xs: '0.7rem', sm: '1rem' } }}>Total Revenue</Typography>
-              <Typography sx={{ color: '#EAECEF', fontWeight: 800, fontSize: { xs: '0.95rem', sm: '2.2rem' }, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>₹{totalAmount.toFixed(2)}</Typography>
+              <Typography gutterBottom sx={{ color: 'text.secondary', fontWeight: 600, fontSize: { xs: '0.7rem', sm: '1rem' } }}>Total Revenue</Typography>
+              <Typography sx={{ color: 'text.primary', fontWeight: 800, fontSize: { xs: '0.95rem', sm: '2.2rem' }, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>₹{totalAmount.toFixed(2)}</Typography>
             </CardContent>
           </Card>
         </Grid>
@@ -1516,15 +1549,15 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
           <Card sx={{
             height: '100%',
             borderRadius: 2,
-            background: '#161A1E',
+            background: theme.palette.background.paper,
             borderTop: '3px solid #F6465D',
-            color: '#EAECEF',
+            color: 'text.primary',
             boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
             transition: 'transform 0.3s, box-shadow 0.3s',
             '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 8px 24px rgba(246, 70, 93, 0.15)' },
           }}>
             <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
-              <Typography gutterBottom sx={{ color: '#848E9C', fontWeight: 600, fontSize: { xs: '0.7rem', sm: '1rem' } }}>Pending Amount</Typography>
+              <Typography gutterBottom sx={{ color: 'text.secondary', fontWeight: 600, fontSize: { xs: '0.7rem', sm: '1rem' } }}>Pending Amount</Typography>
               <Typography sx={{ color: '#F6465D', fontWeight: 800, fontSize: { xs: '0.95rem', sm: '2.2rem' }, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>₹{pendingAmount.toFixed(2)}</Typography>
               <Typography variant="body2" sx={{ color: '#0ECB81', mt: 1, fontWeight: 500, fontSize: { xs: '0.65rem', sm: '0.875rem' }, display: { xs: 'none', sm: 'block' } }}>
                 {Math.round((paidAmount / (totalAmount || 1)) * 100)}% collected
@@ -1561,6 +1594,46 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
                 <MenuItem value="gst">GST Bill</MenuItem>
               </Select>
             </FormControl>
+
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <TextField
+                label="From"
+                type="date"
+                size="small"
+                value={tripFilterFrom}
+                onChange={e => setTripFilterFrom(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+                fullWidth
+              />
+              <TextField
+                label="To"
+                type="date"
+                size="small"
+                value={tripFilterTo}
+                onChange={e => setTripFilterTo(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+                fullWidth
+              />
+            </Box>
+
+            <FormControl fullWidth size="small">
+              <InputLabel id="bill-payment-filter-label">Include</InputLabel>
+              <Select
+                labelId="bill-payment-filter-label"
+                label="Include"
+                value={billPaymentFilter}
+                onChange={(e: SelectChangeEvent) => setBillPaymentFilter(e.target.value as 'all' | 'paid' | 'unpaid')}
+              >
+                <MenuItem value="all">All trips (paid &amp; unpaid)</MenuItem>
+                <MenuItem value="paid">Paid trips only</MenuItem>
+                <MenuItem value="unpaid">Unpaid trips only</MenuItem>
+              </Select>
+            </FormControl>
+
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              {billTrips.length} of {customerTrips.length} trip{customerTrips.length === 1 ? '' : 's'} in range will be included in this bill.
+            </Typography>
+
             {billTypeChoice === 'gst' && (
               <>
                 <TextField
@@ -1580,7 +1653,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
                   fullWidth
                   placeholder="Enter GST invoice number"
                 />
-                <Typography variant="body2" sx={{ color: '#848E9C' }}>
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                   GST is applied to the sub total (after any discount), and the customer's paid amount
                   and advance balance are subtracted from the final GST-inclusive total.
                 </Typography>
@@ -1590,7 +1663,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setIsBillTypeDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleBillTypeContinue} variant="contained" sx={{ color: '#0B0E11', fontWeight: 700 }}>
+          <Button onClick={handleBillTypeContinue} variant="contained" sx={{ color: 'primary.contrastText', fontWeight: 700 }}>
             Continue
           </Button>
         </DialogActions>
@@ -1612,7 +1685,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
           }
         }}
       >
-        <DialogTitle sx={{ m: 0, p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f5f5f5', color: '#333', borderBottom: '1px solid #ddd' }}>
+        <DialogTitle sx={{ m: 0, p: 2, pt: 'calc(16px + env(safe-area-inset-top))', display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f5f5f5', color: '#333', borderBottom: '1px solid #ddd' }}>
           <Typography variant="h6" sx={{ fontWeight: 700, color: '#1a1a1a' }}>Invoice Bill Preview</Typography>
           <IconButton
             aria-label="close"
@@ -1628,6 +1701,11 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
               {dialogMessage.text}
             </Alert>
           )}
+          {/* Shrinks the sheet below to fit entirely on screen (width AND height) on the
+              fullscreen mobile/native preview, instead of requiring a scroll to see it all —
+              see useFitPreviewToViewport. A no-op on desktop. */}
+          <Box ref={previewViewportRef} sx={{ height: '100%' }}>
+          <Box ref={previewSizerRef} sx={{ width: 'fit-content', maxWidth: '100%', margin: '0 auto', overflow: 'hidden' }}>
           {/* Printable Sheet Simulation container */}
           <Box
             ref={previewRef}
@@ -1663,24 +1741,40 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
             }}
           >
             {/* Accent bar */}
-            <Box sx={{ height: '4px', bgcolor: branding?.accentColor || '#F0B90B', mb: 2, zIndex: 1, position: 'relative' }} />
+            <Box sx={{ height: '4px', bgcolor: branding?.accentColor || '#F0B90B', mb: { xs: 1, sm: 2 }, zIndex: 1, position: 'relative' }} />
 
-            {/* Header Content */}
-            <Box sx={{ borderBottom: '3px double #CBD5E1', pb: 2, mb: 2, textAlign: 'center', zIndex: 1, position: 'relative' }}>
-              <Typography variant="h4" sx={{ fontWeight: 800, color: branding?.primaryColor || '#0B2B5E', letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: { xs: '1.4rem', sm: '2.1rem' } }}>
-                {branding?.companyName || 'Shivam Transport'}
-              </Typography>
-              <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#8a8a8a', letterSpacing: '2px', textTransform: 'uppercase', mt: 0.5, fontSize: { xs: '0.7rem', sm: '0.9rem' } }}>
-                {branding?.tagline || 'Transport & Logistics Solutions'}
-              </Typography>
-              {(branding?.proprietorName || branding?.phone1 || branding?.phone2) && (
-                <Typography variant="body2" sx={{ mt: 1, color: '#555', fontSize: '9pt', fontWeight: 500 }}>
-                  {[
-                    branding?.proprietorName ? `Prop.: ${branding.proprietorName}` : '',
-                    [branding?.phone1, branding?.phone2].filter(Boolean).join(' / ') ? `Mob.: ${[branding?.phone1, branding?.phone2].filter(Boolean).join(' / ')}` : '',
-                  ].filter(Boolean).join('  |  ')}
+            {/* Header Content — shorter on mobile's on-screen preview only (xs); the exported
+                PDF/print always captures at the 'sm' width (see utils/billPdf.ts's windowWidth
+                override) so the actual invoice's header is untouched. Width unchanged either way. */}
+            <Box sx={{ borderBottom: '3px double #CBD5E1', pb: { xs: 1, sm: 2 }, mb: { xs: 1.5, sm: 2 }, zIndex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: { xs: 1, sm: 1.5 } }}>
+              {/* Fixed, identical size for both slots — whether one, both, or neither is set, the
+                  company name in the middle stays centered instead of drifting toward the empty side. */}
+              <Box sx={{ flex: '0 0 30mm', width: '30mm', height: { xs: '15mm', sm: '22.5mm' }, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {branding?.headerLeftImageDataUrl && (
+                  <Box component="img" src={branding.headerLeftImageDataUrl} alt="" sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                )}
+              </Box>
+              <Box sx={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
+                <Typography variant="h4" sx={{ fontWeight: 800, color: branding?.primaryColor || '#0B2B5E', letterSpacing: '0.5px', textTransform: 'uppercase', fontSize: { xs: '1.4rem', sm: '2.1rem' } }}>
+                  {branding?.companyName || 'Shivam Transport'}
                 </Typography>
-              )}
+                <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#8a8a8a', letterSpacing: '2px', textTransform: 'uppercase', mt: 0.5, fontSize: { xs: '0.7rem', sm: '0.9rem' } }}>
+                  {branding?.tagline || 'Transport & Logistics Solutions'}
+                </Typography>
+                {(branding?.proprietorName || branding?.phone1 || branding?.phone2) && (
+                  <Typography variant="body2" sx={{ mt: { xs: 0.5, sm: 1 }, color: '#555', fontSize: '9pt', fontWeight: 500 }}>
+                    {[
+                      branding?.proprietorName ? `Prop.: ${branding.proprietorName}` : '',
+                      [branding?.phone1, branding?.phone2].filter(Boolean).join(' / ') ? `Mob.: ${[branding?.phone1, branding?.phone2].filter(Boolean).join(' / ')}` : '',
+                    ].filter(Boolean).join('  |  ')}
+                  </Typography>
+                )}
+              </Box>
+              <Box sx={{ flex: '0 0 30mm', width: '30mm', height: { xs: '15mm', sm: '22.5mm' }, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {branding?.headerRightImageDataUrl && (
+                  <Box component="img" src={branding.headerRightImageDataUrl} alt="" sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                )}
+              </Box>
             </Box>
 
             {/* Invoice Info Layout */}
@@ -1740,7 +1834,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
                   </tr>
                 </thead>
                 <tbody>
-                  {customerTrips.map((trip, idx) => (
+                  {billTrips.map((trip, idx) => (
                     <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#fff' : '#F8FAFC' }}>
                       <td style={{ padding: '5px 8px', border: '1px solid #E2E8F0', textAlign: 'center' }}>
                         {new Date(trip.date).toLocaleDateString('en-IN')}
@@ -1817,18 +1911,27 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
               </table>
             </Box>
 
-            {/* Word Amount */}
-            <Box sx={{ mb: 3, p: 1, bgcolor: '#fcfcfc', border: '1px dashed #ddd', borderRadius: '4px', fontSize: '9pt', color: '#555', zIndex: 1, position: 'relative' }}>
-              <strong>Amount in Words:</strong> &nbsp;
-              <span style={{ fontStyle: 'italic', textTransform: 'capitalize' }}>
-                {amountInWords.trim() || `${convertNumberToWords(Math.round(billTotals.showBreakdown ? billTotals.netPayable : billTotals.subTotal))} Rupees Only`}
-              </span>
-            </Box>
-            {billTotals.advanceApplied > 0 && (
-              <Box sx={{ mb: 3, mt: -2, fontSize: '8.5pt', color: '#555', zIndex: 1, position: 'relative' }}>
-                Advance balance remaining after this bill: <strong>₹{(billTotals.advanceAvailable - billTotals.advanceApplied).toFixed(2)}</strong>
+            {/* Word Amount (+ optional UPI QR to its right) */}
+            <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', mb: 3, zIndex: 1, position: 'relative' }}>
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Box sx={{ p: 1, bgcolor: '#fcfcfc', border: '1px dashed #ddd', borderRadius: '4px', fontSize: '9pt', color: '#555' }}>
+                  <strong>Amount in Words:</strong> &nbsp;
+                  <span style={{ fontStyle: 'italic', textTransform: 'capitalize' }}>
+                    {amountInWords.trim() || `${convertNumberToWords(Math.round(billTotals.showBreakdown ? billTotals.netPayable : billTotals.subTotal))} Rupees Only`}
+                  </span>
+                </Box>
+                {billTotals.advanceApplied > 0 && (
+                  <Box sx={{ mt: 1, fontSize: '8.5pt', color: '#555' }}>
+                    Advance balance remaining after this bill: <strong>₹{(billTotals.advanceAvailable - billTotals.advanceApplied).toFixed(2)}</strong>
+                  </Box>
+                )}
               </Box>
-            )}
+              {shouldShowUpiQr(branding, isGstBill) && (
+                <Box sx={{ flex: '0 0 90px', width: 90, height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Box component="img" src={branding?.upiQrImageDataUrl} alt="UPI QR" sx={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                </Box>
+              )}
+            </Box>
 
             {/* Footer Bank details */}
             <Box sx={{ borderTop: '2px double #CBD5E1', pt: 2, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 3, fontSize: '9pt', color: '#444', zIndex: 1, position: 'relative' }}>
@@ -1877,10 +1980,13 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
               </Typography>
             </Box>
           </Box>
+          </Box>
+          </Box>
         </DialogContent>
         <DialogActions
           sx={{
             p: { xs: 1.5, sm: 2 },
+            pb: { xs: 'calc(12px + env(safe-area-inset-bottom))', sm: 'calc(16px + env(safe-area-inset-bottom))' },
             bgcolor: '#f5f5f5',
             borderTop: '1px solid #ddd',
             gap: 1,
@@ -1983,7 +2089,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setIsEditCustomerOpen(false)}>Cancel</Button>
-          <Button onClick={handleSaveCustomerEdit} variant="contained" disabled={savingCustomerEdit} sx={{ color: '#0B0E11', fontWeight: 700 }}>
+          <Button onClick={handleSaveCustomerEdit} variant="contained" disabled={savingCustomerEdit} sx={{ color: 'primary.contrastText', fontWeight: 700 }}>
             {savingCustomerEdit ? 'Saving...' : 'Save Changes'}
           </Button>
         </DialogActions>
@@ -1997,7 +2103,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
             "{pendingCustomerEdit?.name}" is very similar to an existing customer, "{collisionMatch?.name}".
             Are these the same customer?
           </Alert>
-          <Typography variant="body2" sx={{ color: '#848E9C' }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
             Merging moves all trips from this record onto "{collisionMatch?.name}" and removes this duplicate.
             Choose "Keep Separate" if they're genuinely two different customers who happen to have similar names.
           </Typography>
@@ -2018,7 +2124,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
         <DialogTitle>Add Advance Payment</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 0.5 }}>
-            <Typography variant="body2" sx={{ color: '#848E9C' }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
               Record money this customer has already paid ahead of any specific trip — it'll be available to
               draw down later when settling a trip's payment.
             </Typography>
@@ -2050,7 +2156,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setIsAdvanceDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleAddAdvance} variant="contained" disabled={savingAdvance} sx={{ color: '#0B0E11', fontWeight: 700 }}>
+          <Button onClick={handleAddAdvance} variant="contained" disabled={savingAdvance} sx={{ color: 'primary.contrastText', fontWeight: 700 }}>
             {savingAdvance ? 'Saving...' : 'Add Advance'}
           </Button>
         </DialogActions>
@@ -2084,7 +2190,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
               placeholder="Search by note, amount, or date..."
               value={advanceSearchTerm}
               onChange={e => setAdvanceSearchTerm(e.target.value)}
-              InputProps={{ startAdornment: <InputAdornment position="start"><FilterAlt fontSize="small" sx={{ color: '#848E9C' }} /></InputAdornment> }}
+              InputProps={{ startAdornment: <InputAdornment position="start"><FilterAlt fontSize="small" sx={{ color: 'text.secondary' }} /></InputAdornment> }}
             />
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
               <TextField
@@ -2116,7 +2222,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
                   size="small"
                   startIcon={<Clear />}
                   onClick={() => { setAdvanceSearchTerm(''); setAdvanceAmountMin(''); setAdvanceAmountMax(''); setAdvanceDateFrom(''); setAdvanceDateTo(''); }}
-                  sx={{ color: '#848E9C' }}
+                  sx={{ color: 'text.secondary' }}
                 >
                   Clear
                 </Button>
@@ -2137,7 +2243,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
                         edge="end"
                         size="small"
                         onClick={() => setDeleteAdvanceEntry({ id: entry.id, amount: entry.amount, note: entry.note })}
-                        sx={{ color: '#848E9C', '&:hover': { color: '#F6465D' } }}
+                        sx={{ color: 'text.secondary', '&:hover': { color: '#F6465D' } }}
                       >
                         <Delete fontSize="small" />
                       </IconButton>
@@ -2167,7 +2273,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
 
           {deletedAdvanceHistory.length > 0 && (
             <Box sx={{ mt: 3 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#848E9C', mb: 1 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'text.secondary', mb: 1 }}>
                 Deleted Payments (kept for record only)
               </Typography>
               <List sx={{ p: 0 }}>
@@ -2182,7 +2288,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
                           edge="end"
                           size="small"
                           onClick={() => setPermanentDeleteEntry({ id: entry.id, amount: entry.amount, note: entry.note })}
-                          sx={{ color: '#848E9C', '&:hover': { color: '#F6465D' } }}
+                          sx={{ color: 'text.secondary', '&:hover': { color: '#F6465D' } }}
                         >
                           <Delete fontSize="small" />
                         </IconButton>
@@ -2196,7 +2302,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
                           <Typography variant="body2" sx={{ fontWeight: 600, textDecoration: entry.usedInBillNo ? 'none' : 'line-through' }}>
                             {new Date(entry.date).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: '2-digit' })}
                           </Typography>
-                          <Typography variant="subtitle1" sx={{ fontWeight: 800, textDecoration: entry.usedInBillNo ? 'none' : 'line-through', color: '#848E9C' }}>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 800, textDecoration: entry.usedInBillNo ? 'none' : 'line-through', color: 'text.secondary' }}>
                             +₹{entry.amount.toFixed(2)}
                           </Typography>
                         </Box>
@@ -2289,7 +2395,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
           <Button
             onClick={() => { if (tripBillAdvancePrompt) generateTripBillDownload(tripBillAdvancePrompt, true); setTripBillAdvancePrompt(null); }}
             variant="contained"
-            sx={{ color: '#0B0E11', fontWeight: 700 }}
+            sx={{ color: 'primary.contrastText', fontWeight: 700 }}
           >
             Yes, Apply
           </Button>

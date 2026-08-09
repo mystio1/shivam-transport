@@ -15,12 +15,14 @@ import {
   Paper,
   TextField,
   Typography,
+  useTheme,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { PersonAdd, Send } from '@mui/icons-material';
 import { useAppContext } from '../context/AppContext';
+import LoadingOverlay from '../components/LoadingOverlay';
 import type { Customer } from '../types';
 
 // A draft ("new customer") never has a real id yet — it only gets one once the admin approves
@@ -45,6 +47,7 @@ const emptyTripFields = {
 // keeps the offline queue (submit with no signal, sync automatically once reconnected) and lands
 // the trip as "pending" for the admin to approve, rather than adding it already-approved.
 const DriverSubmitTrip = () => {
+  const theme = useTheme();
   const { customers, submitDriverTrip } = useAppContext();
   const [pickedExisting, setPickedExisting] = useState<Customer | null>(null);
   const [draftCustomer, setDraftCustomer] = useState<DraftCustomer | null>(null);
@@ -116,17 +119,17 @@ const DriverSubmitTrip = () => {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       <Box>
-        <Typography variant="h5" component="h1" sx={{ fontWeight: 700, color: '#EAECEF' }}>
+        <Typography variant="h5" component="h1" sx={{ fontWeight: 700, color: 'text.primary' }}>
           Submit Trip
         </Typography>
-        <Typography variant="body2" sx={{ color: '#848E9C', mt: 0.5 }}>
+        <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
           Pick a customer, then fill in the trip details. This reaches the admin dashboard immediately after submission.
         </Typography>
       </Box>
 
       {message && <Alert severity={message.type}>{message.text}</Alert>}
 
-      <Paper elevation={0} sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, background: '#161A1E', border: '1px solid #2B3139' }}>
+      <Paper elevation={0} sx={{ p: { xs: 2, sm: 3 }, borderRadius: 2, background: 'background.paper', border: `1px solid ${theme.palette.divider}` }}>
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <Autocomplete
             options={customers}
@@ -154,8 +157,8 @@ const DriverSubmitTrip = () => {
       </Paper>
 
       {selectedCustomer ? (
-        <Paper elevation={0} sx={{ p: { xs: 2, sm: 4 }, borderRadius: 2, background: '#161A1E', border: '1px solid #2B3139' }}>
-          <Typography variant="h5" gutterBottom sx={{ fontWeight: 700, mb: 2, color: '#EAECEF' }}>
+        <Paper elevation={0} sx={{ p: { xs: 2, sm: 4 }, borderRadius: 2, background: 'background.paper', border: `1px solid ${theme.palette.divider}` }}>
+          <Typography variant="h5" gutterBottom sx={{ fontWeight: 700, mb: 2, color: 'text.primary' }}>
             Add New Trip for <span style={{ color: '#F0B90B' }}>{selectedCustomer.name}</span>
           </Typography>
           <Grid container spacing={3}>
@@ -242,12 +245,12 @@ const DriverSubmitTrip = () => {
                       checked={tripFields.isPaid}
                       onChange={e => setTripFields(prev => ({ ...prev, isPaid: e.target.checked }))}
                       sx={{
-                        color: '#848E9C',
+                        color: 'text.secondary',
                         '&.Mui-checked': { color: '#0ECB81' },
                       }}
                     />
                   }
-                  label={<Typography sx={{ fontWeight: 600, color: tripFields.isPaid ? '#0ECB81' : '#848E9C' }}>Payment Received</Typography>}
+                  label={<Typography sx={{ fontWeight: 600, color: tripFields.isPaid ? '#0ECB81' : 'text.secondary' }}>Payment Received</Typography>}
                 />
               </Box>
             </Grid>
@@ -258,7 +261,7 @@ const DriverSubmitTrip = () => {
                   startIcon={<Send />}
                   onClick={handleSubmit}
                   disabled={loading}
-                  sx={{ color: '#0B0E11', fontWeight: 800 }}
+                  sx={{ color: 'primary.contrastText', fontWeight: 800 }}
                 >
                   {loading ? 'Submitting...' : 'Submit Trip'}
                 </Button>
@@ -267,8 +270,8 @@ const DriverSubmitTrip = () => {
           </Grid>
         </Paper>
       ) : (
-        <Paper elevation={0} sx={{ p: 4, borderRadius: 2, background: '#161A1E', border: '1px dashed #2B3139', textAlign: 'center' }}>
-          <Typography sx={{ color: '#848E9C' }}>Select or create a customer above to add a trip for them.</Typography>
+        <Paper elevation={0} sx={{ p: 4, borderRadius: 2, background: 'background.paper', border: `1px dashed ${theme.palette.divider}`, textAlign: 'center' }}>
+          <Typography sx={{ color: 'text.secondary' }}>Select or create a customer above to add a trip for them.</Typography>
         </Paper>
       )}
 
@@ -303,11 +306,13 @@ const DriverSubmitTrip = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setIsNewCustomerOpen(false)}>Cancel</Button>
-          <Button onClick={handleCreateCustomer} variant="contained" sx={{ color: '#0B0E11', fontWeight: 700 }}>
+          <Button onClick={handleCreateCustomer} variant="contained" sx={{ color: 'primary.contrastText', fontWeight: 700 }}>
             Create &amp; Select
           </Button>
         </DialogActions>
       </Dialog>
+
+      <LoadingOverlay open={loading} label="Submitting trip…" />
     </Box>
   );
 };
