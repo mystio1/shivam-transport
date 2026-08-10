@@ -295,9 +295,14 @@ export const AppProvider = ({ children }: AppProviderProps) => {
   }, []);
 
   // ── Refresh data when user logs in ────────────────────────────────────
+  // `user?.id`, not `user` — the SSE 'connected' handler below calls setUser() with a freshly
+  // parsed object on every reconnect, which is a new reference even when nothing changed; keying
+  // on the id instead means an actual login/logout/impersonation switch still refreshes, without
+  // an incidental reconnect re-fetching everything all over again.
   useEffect(() => {
     if (user) refreshData();
-  }, [user, refreshData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, refreshData]);
 
   // ── Document-expiry reminders (in-app notification center + native push) ──
   useEffect(() => {
@@ -376,7 +381,15 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     // live update) would silently stop arriving until the page was manually reloaded.
     events.onerror = () => {};
     return () => events.close();
-  }, [user, getToken, refreshData]);
+    // Deliberately `user?.id`, not `user` — the 'connected' handler above calls setUser() with a
+    // freshly-parsed object on every (re)connect, which is a NEW reference even when nothing
+    // actually changed. Depending on the whole `user` object here would tear down and recreate
+    // this very connection every time that fires, which re-fires 'connected' immediately, which
+    // calls setUser() again — a tight reconnect-storm loop that was hammering the API with
+    // dozens of requests per second before this was narrowed to the one thing that should
+    // actually restart the connection: switching to a different logged-in user (or logging out).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, getToken, refreshData]);
 
   // ── Auth actions ───────────────────────────────────────────────────────
   const login = async (input: LoginInput): Promise<void> => {

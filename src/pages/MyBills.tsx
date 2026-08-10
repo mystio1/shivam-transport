@@ -645,6 +645,9 @@ const MyBills = () => {
                   )}
                 </Box>
 
+                {/* Bank details + signature + closing note — kept as one unbreakable unit so a
+                    PDF page boundary never lands mid-signature (see renderBillNodeToA4Pdf). */}
+                <Box data-keep-together="true">
                 <Box sx={{ borderTop: '2px double #CBD5E1', pt: 2, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 3, fontSize: '9pt', color: '#444', zIndex: 1, position: 'relative' }}>
                   <Box sx={{ flex: 1 }}>
                     <Typography variant="subtitle2" sx={{ fontWeight: 700, color: branding?.primaryColor || '#0B2B5E', mb: 0.5 }}>BANK DETAILS</Typography>
@@ -688,6 +691,7 @@ const MyBills = () => {
                   <Typography variant="body2" sx={{ color: '#888', fontStyle: 'italic', fontSize: '8.5pt' }}>
                     {branding?.footerNote || 'Thank you for your business!'}
                   </Typography>
+                </Box>
                 </Box>
               </Box>
               </Box>
@@ -927,6 +931,9 @@ const MyBills = () => {
                   This is an estimated quotation, not a tax invoice. Final billing may vary based on actual trip details.
                 </Box>
 
+                {/* Signature + closing note — kept as one unbreakable unit so a PDF page
+                    boundary never lands mid-signature (see renderBillNodeToA4Pdf). */}
+                <Box data-keep-together="true">
                 <Box sx={{ borderTop: '2px double #CBD5E1', pt: 2, display: 'flex', justifyContent: 'flex-end' }}>
                   <Box sx={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: '150px' }}>
                     <Typography variant="body2" sx={{ fontWeight: 600, color: '#333', fontStyle: 'italic', mb: 1 }}>
@@ -947,6 +954,7 @@ const MyBills = () => {
                   <Typography variant="body2" sx={{ color: '#888', fontStyle: 'italic', fontSize: '8.5pt' }}>
                     {branding?.footerNote || 'Thank you for your business!'}
                   </Typography>
+                </Box>
                 </Box>
               </Box>
               </Box>

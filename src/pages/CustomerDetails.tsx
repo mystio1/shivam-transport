@@ -771,8 +771,9 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
       .words-box b { color:#1a1a1a; }
       .upi-qr-box { flex:0 0 90px; width:90px; height:90px; display:flex; align-items:center; justify-content:center; }
       .upi-qr-box img { max-width:100%; max-height:100%; object-fit:contain; }
-      /* bank + signature footer */
-      .footer-row { display:flex; gap:24px; border-top:2px double #CBD5E1; padding-top:14px; font-size:9pt; color:#444; }
+      /* bank + signature footer — never split across a page break (a printer/PDF-via-print
+         engine, unlike html2canvas, actually respects this). */
+      .footer-row { display:flex; gap:24px; border-top:2px double #CBD5E1; padding-top:14px; font-size:9pt; color:#444; page-break-inside:avoid; break-inside:avoid; }
       .bank-col { flex:1; }
       .bank-title { font-weight:700; color:${primaryColor}; margin-bottom:4px; font-size:9.5pt; }
       .bank-col table { width:100%; font-size:8.5pt; }
@@ -783,7 +784,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
       .sign-img { max-width:140px; max-height:50px; object-fit:contain; margin-bottom:4px; }
       .sign-line { font-weight:700; border-top:1px solid #666; padding-top:4px; width:140px; margin-left:auto; text-align:center; font-size:8.5pt; }
       /* footer note */
-      .footer-note { text-align:center; margin-top:18px; font-size:8.5pt; color:#888; font-style:italic; }
+      .footer-note { text-align:center; margin-top:18px; font-size:8.5pt; color:#888; font-style:italic; page-break-inside:avoid; break-inside:avoid; }
       @media print {
         body { background:#fff; }
         .page { max-width:100%; }
@@ -1945,7 +1946,9 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
               )}
             </Box>
 
-            {/* Footer Bank details */}
+            {/* Footer Bank details + signature + closing note — kept as one unbreakable unit so
+                a PDF page boundary never lands mid-signature (see renderBillNodeToA4Pdf). */}
+            <Box data-keep-together="true">
             <Box sx={{ borderTop: '2px double #CBD5E1', pt: 2, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 3, fontSize: '9pt', color: '#444', zIndex: 1, position: 'relative' }}>
               <Box sx={{ flex: 1 }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 700, color: branding?.primaryColor || '#0B2B5E', mb: 0.5 }}>BANK DETAILS</Typography>
@@ -1990,6 +1993,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
               <Typography variant="body2" sx={{ color: '#888', fontStyle: 'italic', fontSize: '8.5pt' }}>
                 {branding?.footerNote || 'Thank you for your business!'}
               </Typography>
+            </Box>
             </Box>
           </Box>
           </Box>
