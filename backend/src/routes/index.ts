@@ -16,15 +16,12 @@ import { vehiclesRouter } from './vehicles.routes.js';
 import { requireAuth, blockIfFrozen } from '../middleware/auth.js';
 import { notFound } from '../middleware/errorHandler.js';
 import { checkDbBreaker } from '../middleware/dbCircuitBreaker.js';
-import { globalApiLimiter } from '../middleware/rateLimit.js';
 
 export const apiRouter = Router();
 
-// Health check bypasses both — Render's own liveness probe must never be blocked by database
-// trouble or request volume, since a healthy-but-DB-down process restarting in a loop would only
-// make things worse.
+// Health check bypasses this too — Render's own liveness probe must never be blocked by database
+// trouble, since a healthy-but-DB-down process restarting in a loop would only make things worse.
 apiRouter.use(healthRouter);
-apiRouter.use(globalApiLimiter);
 apiRouter.use(checkDbBreaker());
 apiRouter.use('/auth', authRouter);
 // Cross-tenant, password-gated — deliberately mounted here, before the per-business

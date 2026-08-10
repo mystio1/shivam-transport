@@ -525,14 +525,6 @@ async function handleApi(req, res) {
     return send(res, 200, { ok: true, time: now() });
   }
 
-  // Applied to every other route — the last line of defense against a single client (a buggy
-  // retry loop, a runaway offline-sync queue, an abusive script) hammering the database with
-  // requests. 300/5min per IP is generous for genuine use, well above what loading pages and
-  // submitting several trips back-to-back needs.
-  if (isRateLimited(req, 'global', 300, 5 * 60 * 1000)) {
-    return send(res, 429, { message: 'Too many requests from this device. Please slow down and try again shortly.' });
-  }
-
   // If MongoDB is configured and currently failing, stop hammering it and fail fast instead of
   // letting every request pile up its own timeout against an already-struggling database — the
   // same reasoning as backend/src's dbCircuitBreaker. Not applicable to the local-file mode

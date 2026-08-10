@@ -20,6 +20,8 @@ import dayjs, { Dayjs } from 'dayjs';
 import { openWhatsApp } from '../utils/whatsapp';
 import EmptyState from './EmptyState';
 import { ListRowsSkeleton } from './Skeletons';
+import LoadingOverlay from './LoadingOverlay';
+import { useToast } from './ToastProvider';
 
 
 // Type definitions
@@ -56,6 +58,8 @@ const CustomerList: React.FC = () => {
   const showSkeleton = isLoading && customers.length === 0;
   const navigate = useNavigate();
   const theme = useTheme();
+  const toast = useToast();
+  const [savingCustomer, setSavingCustomer] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [filterDate, setFilterDate] = useState<Dayjs | null>(null);
@@ -136,7 +140,8 @@ const CustomerList: React.FC = () => {
 
   const handleAddCustomer = () => {
     if (!validateForm()) return;
-    
+
+    setSavingCustomer(true);
     addCustomerWithCallback({
       name: newCustomer.name.trim(),
       phone: newCustomer.phone.trim(),
@@ -144,9 +149,13 @@ const CustomerList: React.FC = () => {
       email: newCustomer.email.trim(),
       gstNumber: newCustomer.gstNumber.trim(),
     }, (newId: string) => {
+      setSavingCustomer(false);
       setNewCustomer({ name: '', phone: '', address: '', email: '', gstNumber: '' });
       setOpenAddDialog(false);
       navigate(`/customer/${newId}`);
+    }, (error) => {
+      setSavingCustomer(false);
+      toast.error(error instanceof Error ? error.message : 'Could not add customer. Please try again.');
     });
   };
 
@@ -466,7 +475,14 @@ const CustomerList: React.FC = () => {
         </Box>
 
         {/* Add Customer Dialog */}
-        <Dialog open={openAddDialog} onClose={() => setOpenAddDialog(false)} maxWidth="sm" fullWidth>
+        <Dialog
+          open={openAddDialog}
+          onClose={() => !savingCustomer && setOpenAddDialog(false)}
+          maxWidth="sm"
+          fullWidth
+          PaperProps={{ sx: { position: 'relative', overflow: 'hidden' } }}
+        >
+          <LoadingOverlay open={savingCustomer} absolute label="Adding customer…" />
           <DialogTitle>Add New Customer</DialogTitle>
           <DialogContent>
             <Box sx={{ pt: 1 }}>
@@ -524,8 +540,8 @@ const CustomerList: React.FC = () => {
             </Box>
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setOpenAddDialog(false)}>Cancel</Button>
-            <Button onClick={handleAddCustomer} variant="contained" color="primary">Add Customer</Button>
+            <Button onClick={() => setOpenAddDialog(false)} disabled={savingCustomer}>Cancel</Button>
+            <Button onClick={handleAddCustomer} variant="contained" color="primary" disabled={savingCustomer}>Add Customer</Button>
           </DialogActions>
         </Dialog>
 

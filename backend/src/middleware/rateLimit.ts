@@ -19,10 +19,3 @@ export const loginLimiter = rateLimiter(5, 60 * 1000, 'Too many login attempts. 
 export const forgotPasswordLimiter = rateLimiter(5, 60 * 60 * 1000, 'Too many requests. Please try again later.');
 export const resetPasswordLimiter = rateLimiter(10, 60 * 60 * 1000, 'Too many attempts. Please try again later.');
 export const emailLimiter = rateLimiter(10, 60 * 60 * 1000, 'Too many emails sent. Please try again later.');
-
-// Applied across every /api route (on top of the narrower ones above) — the last line of defense
-// against a single client (a buggy retry loop, a runaway offline-sync queue, an abusive script)
-// hammering the database with requests. 300/5min per IP is generous for genuine use — loading
-// every page in the app plus submitting several trips back-to-back doesn't come close — while
-// still capping how much load any one source can put on the database.
-export const globalApiLimiter = rateLimiter(300, 5 * 60 * 1000, 'Too many requests from this device. Please slow down and try again shortly.');

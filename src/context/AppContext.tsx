@@ -87,7 +87,7 @@ interface AppContextType {
   authLoading: boolean;
   isLoading: boolean;
   addCustomer: (customer: Omit<Customer, 'id'> | string) => Promise<string>;
-  addCustomerWithCallback: (customer: Omit<Customer, 'id'>, callback: (id: string) => void) => void;
+  addCustomerWithCallback: (customer: Omit<Customer, 'id'>, callback: (id: string) => void, onError?: (error: unknown) => void) => void;
   updateCustomer: (customerId: string, updates: Partial<Customer>) => Promise<void>;
   addCustomerAdvance: (customerId: string, amount: number, note?: string, date?: string) => Promise<void>;
   deleteCustomerAdvance: (customerId: string, advanceId: string) => Promise<void>;
@@ -524,10 +524,14 @@ export const AppProvider = ({ children }: AppProviderProps) => {
   const addCustomerWithCallback = (
     customerData: Omit<Customer, 'id'>,
     callback: (id: string) => void,
+    onError?: (error: unknown) => void,
   ) => {
     addCustomer(customerData)
       .then(callback)
-      .catch(err => console.error('Error adding customer:', err));
+      .catch(err => {
+        console.error('Error adding customer:', err);
+        onError?.(err);
+      });
   };
 
   const updateCustomer = async (customerId: string, updates: Partial<Customer>) => {

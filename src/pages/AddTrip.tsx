@@ -7,6 +7,7 @@ import { PersonAdd } from '@mui/icons-material';
 import { useSearchParams } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
 import TripForm from '../components/TripForm';
+import LoadingOverlay from '../components/LoadingOverlay';
 import type { Customer } from '../types';
 
 const EMPTY_NEW_CUSTOMER = { name: '', phone: '', address: '', email: '', gstNumber: '' };
@@ -93,7 +94,14 @@ const AddTrip = () => {
       )}
 
       {/* Create New Customer Dialog */}
-      <Dialog open={isNewCustomerOpen} onClose={() => setIsNewCustomerOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog
+        open={isNewCustomerOpen}
+        onClose={() => !savingCustomer && setIsNewCustomerOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{ sx: { position: 'relative', overflow: 'hidden' } }}
+      >
+        <LoadingOverlay open={savingCustomer} absolute label="Creating customer…" />
         <DialogTitle>New Customer</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>

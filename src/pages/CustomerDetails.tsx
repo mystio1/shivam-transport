@@ -64,6 +64,7 @@ import { useAppContext } from '../context/AppContext';
 import TripList from '../components/TripList';
 import { DetailPageSkeleton } from '../components/Skeletons';
 import { useToast } from '../components/ToastProvider';
+import LoadingOverlay from '../components/LoadingOverlay';
 import { renderBillNodeToA4Pdf } from '../utils/billPdf';
 import { shouldShowUpiQr } from '../utils/upiQrImage';
 import { findSimilarName } from '../utils/similarity';
@@ -171,6 +172,7 @@ const CustomerDetails = () => {
   );
   const [sharingBill, setSharingBill] = useState(false);
   const [savingBillRecord, setSavingBillRecord] = useState(false);
+  const [printingBill, setPrintingBill] = useState(false);
 
   // Find customer by ID
   const customer = customers.find(c => c.id === id);
@@ -919,10 +921,12 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
 
   const handlePrintBill = async () => {
     setDialogMessage(null);
+    setPrintingBill(true);
     try {
       if (customer) await checkBillGenerationLimit(customer.id, 'pdf');
     } catch (error) {
       setDialogMessage({ type: 'error', text: error instanceof Error ? error.message : 'Could not generate the bill' });
+      setPrintingBill(false);
       return;
     }
     const formattedBillDate = billDate
@@ -936,6 +940,7 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
       amountWordsOverride: amountInWords,
     });
     openPrintWindow(html, `Invoice_${customer.name}`);
+    setPrintingBill(false);
   };
 
   // Trip History → "Download Bill": a standalone single-trip invoice, independent of whatever
@@ -1695,9 +1700,16 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
             color: '#1a1a1a',
             p: { xs: 0, sm: 3 },
             backgroundImage: 'none', // Remove default Dialog dark theme gradient overlay
+            position: 'relative',
+            overflow: 'hidden',
           }
         }}
       >
+        <LoadingOverlay
+          open={savingBillRecord || sharingBill || printingBill}
+          absolute
+          label={savingBillRecord ? 'Saving bill…' : sharingBill ? 'Preparing PDF…' : 'Generating bill…'}
+        />
         <DialogTitle sx={{ m: 0, p: 2, pt: 'calc(16px + env(safe-area-inset-top))', display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f5f5f5', color: '#333', borderBottom: '1px solid #ddd' }}>
           <Typography variant="h6" sx={{ fontWeight: 700, color: '#1a1a1a' }}>Invoice Bill Preview</Typography>
           <IconButton

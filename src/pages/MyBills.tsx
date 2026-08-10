@@ -8,6 +8,7 @@ import {
 import { ReceiptLong, Search, Clear, ArrowForward, AccountBalanceWallet, Delete, Close, Download, RequestQuote, Add, ArrowBack } from '@mui/icons-material';
 import EmptyState from '../components/EmptyState';
 import { ListRowsSkeleton } from '../components/Skeletons';
+import LoadingOverlay from '../components/LoadingOverlay';
 import { Capacitor } from '@capacitor/core';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
@@ -425,8 +426,9 @@ const MyBills = () => {
         maxWidth="md"
         fullWidth
         fullScreen={Capacitor.isNativePlatform() || isSmallScreen}
-        PaperProps={{ sx: { bgcolor: '#ffffff', color: '#1a1a1a', p: { xs: 0, sm: 3 }, backgroundImage: 'none' } }}
+        PaperProps={{ sx: { bgcolor: '#ffffff', color: '#1a1a1a', p: { xs: 0, sm: 3 }, backgroundImage: 'none', position: 'relative', overflow: 'hidden' } }}
       >
+        <LoadingOverlay open={downloadingPdf} absolute label="Preparing PDF…" />
         <DialogTitle sx={{ m: 0, p: 2, pt: 'calc(16px + env(safe-area-inset-top))', display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f5f5f5', color: '#333', borderBottom: '1px solid #ddd' }}>
           <Typography variant="h6" sx={{ fontWeight: 700, color: '#1a1a1a' }}>Invoice Bill Preview</Typography>
           <IconButton aria-label="close" onClick={() => setSelectedBill(null)} sx={{ color: '#666' }}>
@@ -748,8 +750,9 @@ const MyBills = () => {
         maxWidth="md"
         fullWidth
         fullScreen={Capacitor.isNativePlatform() || isSmallScreen}
-        PaperProps={quotationStep === 'preview' ? { sx: { bgcolor: '#ffffff', color: '#1a1a1a', p: { xs: 0, sm: 3 }, backgroundImage: 'none' } } : undefined}
+        PaperProps={quotationStep === 'preview' ? { sx: { bgcolor: '#ffffff', color: '#1a1a1a', p: { xs: 0, sm: 3 }, backgroundImage: 'none', position: 'relative', overflow: 'hidden' } } : undefined}
       >
+        {quotationStep === 'preview' && <LoadingOverlay open={downloadingQuotationPdf} absolute label="Preparing PDF…" />}
         {quotationStep === 'form' ? (
           <>
             <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 'calc(16px + env(safe-area-inset-top))' }}>

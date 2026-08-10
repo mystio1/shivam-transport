@@ -19,6 +19,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useAppContext } from '../context/AppContext';
 import type { Trip } from '../types';
 import { useToast } from './ToastProvider';
+import LoadingOverlay from './LoadingOverlay';
 
 interface TripFormProps {
   customerId: string;
@@ -163,10 +164,13 @@ const TripForm: React.FC<TripFormProps> = ({ customerId, onTripAdded }) => {
     return valid;
   };
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateForm() || !selectedDriver) return;
 
+    setIsSubmitting(true);
     try {
       await addTrip({ ...tripData, driverId: selectedDriver.id });
       toast.success('Trip added.');
@@ -192,11 +196,14 @@ const TripForm: React.FC<TripFormProps> = ({ customerId, onTripAdded }) => {
       // Previously silently logged to the console only — the admin had no way to know the trip
       // wasn't actually saved.
       toast.error(error instanceof Error ? error.message : 'Could not add trip. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <Paper elevation={0} sx={{ p: { xs: 2, sm: 4 }, mb: 4, borderRadius: 2, background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}` }}>
+    <Paper elevation={0} sx={{ p: { xs: 2, sm: 4 }, mb: 4, borderRadius: 2, background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}`, position: 'relative', overflow: 'hidden' }}>
+      <LoadingOverlay open={isSubmitting} absolute label="Adding trip…" />
       <Typography variant="h5" gutterBottom sx={{ fontWeight: 700, mb: 2, color: 'text.primary' }}>
         Add New Trip for <span style={{ color: '#F0B90B' }}>{customer?.name}</span>
       </Typography>
@@ -375,6 +382,7 @@ const TripForm: React.FC<TripFormProps> = ({ customerId, onTripAdded }) => {
                 variant="contained"
                 color="primary"
                 size="large"
+                disabled={isSubmitting}
                 sx={{
                   fontWeight: 600,
                   padding: '10px 32px',
