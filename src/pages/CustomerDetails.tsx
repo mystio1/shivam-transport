@@ -63,6 +63,7 @@ import type { Trip } from '../types';
 import { useAppContext } from '../context/AppContext';
 import TripList from '../components/TripList';
 import { DetailPageSkeleton } from '../components/Skeletons';
+import { useToast } from '../components/ToastProvider';
 import { renderBillNodeToA4Pdf } from '../utils/billPdf';
 import { shouldShowUpiQr } from '../utils/upiQrImage';
 import { findSimilarName } from '../utils/similarity';
@@ -90,6 +91,7 @@ const CustomerDetails = () => {
     addCustomerAdvance, deleteCustomerAdvance, permanentlyDeleteCustomerAdvance, mergeCustomer, saveBill,
     checkBillGenerationLimit,
   } = useAppContext();
+  const toast = useToast();
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const triedRedirect = useRef(false);
   // Add a state to track if data is loaded
@@ -887,6 +889,9 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
 
   // Opens the print window (browser) or hands the HTML to the native printer plugin (Capacitor).
   // Used for both the main filtered bill and the single-trip "Download Bill" action.
+  // Uses the global toast (not the inline `dialogMessage` Alert) because this is called from two
+  // places — the Invoice Preview dialog AND the Trip History list's per-trip "Download Bill"
+  // button, which renders nowhere near that Alert. A toast is visible either way.
   const openPrintWindow = (html: string, docName: string) => {
     if (Capacitor.isNativePlatform()) {
       const cleanHtml = html.replace('<script>window.addEventListener("load",function(){setTimeout(function(){window.focus();window.print();},450);});</script>', '');
@@ -895,10 +900,17 @@ ${branding?.footerNote || 'Thank you for your business!'}`;
         html: cleanHtml
       }).catch(err => {
         console.error("Print error:", err);
+        toast.error('Could not open the print dialog. Please try again.');
       });
     } else {
+      // Returns null instead of throwing when a popup blocker steps in — silently doing nothing
+      // here is exactly what makes a blocked popup look like "the button doesn't work" instead
+      // of a browser setting the user can actually fix.
       const printWindow = window.open('', '', 'width=960,height=900');
-      if (!printWindow) return;
+      if (!printWindow) {
+        toast.error('Your browser blocked the print window. Please allow pop-ups for this site and try again.');
+        return;
+      }
       printWindow.document.write(html);
       printWindow.document.close();
     }
