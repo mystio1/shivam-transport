@@ -1,5 +1,5 @@
 # ============================================================
-#  SHIVAM TRANSPORT — START SERVER + PUBLIC TUNNEL
+#  SHIVAM TRANSPORT — START SERVER + CLOUDFLARE TUNNEL
 #  Run this script: Right-click → "Run with PowerShell"
 # ============================================================
 
@@ -8,7 +8,7 @@ Write-Host "========================================" -ForegroundColor Yellow
 Write-Host "   SHIVAM TRANSPORT STARTUP" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Yellow
 
-# Kill any existing server on port 4000
+# ── Kill any existing server on port 4000 ──────────────────
 $existing = Get-NetTCPConnection -LocalPort 4000 -ErrorAction SilentlyContinue
 if ($existing) {
     Write-Host "Stopping old server on port 4000..." -ForegroundColor Cyan
@@ -18,7 +18,7 @@ if ($existing) {
     Start-Sleep -Seconds 1
 }
 
-# Start the Node.js backend server in a new window
+# ── Start the Node.js backend server in a new window ───────
 Write-Host "Starting backend server..." -ForegroundColor Green
 $serverScript = Join-Path $PSScriptRoot "backend\server.mjs"
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "node `"$serverScript`"" -WindowStyle Normal
@@ -26,83 +26,126 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "node `"$serverScr
 # Give server time to start
 Start-Sleep -Seconds 2
 
-# Check if ngrok is configured
-$ngrokConfig = "$env:USERPROFILE\.config\ngrok\ngrok.yml"
-$needsToken = $true
+# ── Find cloudflared ────────────────────────────────────────
+# Searches: PATH, this script's folder, Desktop, Downloads
+$cloudflaredCmd = $null
 
-if (Test-Path $ngrokConfig) {
-    $content = Get-Content $ngrokConfig -Raw
-    if ($content -match "authtoken") {
-        $needsToken = $false
+# 1. Already on PATH?
+if (Get-Command cloudflared -ErrorAction SilentlyContinue) {
+    $cloudflaredCmd = "cloudflared"
+}
+
+# 2. Next to this script?
+if (-not $cloudflaredCmd) {
+    $local = Join-Path $PSScriptRoot "cloudflared.exe"
+    if (Test-Path $local) { $cloudflaredCmd = $local }
+}
+
+# 3. Desktop or Downloads?
+foreach ($candidate in @(
+    "$env:USERPROFILE\Desktop\cloudflared.exe",
+    "$env:USERPROFILE\Downloads\cloudflared.exe",
+    "$env:USERPROFILE\Downloads\cloudflared-windows-amd64.exe"
+)) {
+    if (-not $cloudflaredCmd -and (Test-Path $candidate)) {
+        $cloudflaredCmd = $candidate
     }
 }
 
-if ($needsToken) {
+if (-not $cloudflaredCmd) {
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Red
-    Write-Host "  NGROK SETUP REQUIRED (one time only)" -ForegroundColor Red
+    Write-Host "  CLOUDFLARED NOT FOUND (one-time setup)" -ForegroundColor Red
     Write-Host "========================================" -ForegroundColor Red
     Write-Host ""
-    Write-Host "1. Open this URL in browser:" -ForegroundColor White
-    Write-Host "   https://dashboard.ngrok.com/signup" -ForegroundColor Cyan
+    Write-Host "1. Download cloudflared.exe from:" -ForegroundColor White
+    Write-Host "   https://github.com/cloudflare/cloudflared/releases/latest" -ForegroundColor Cyan
+    Write-Host "   (pick: cloudflared-windows-amd64.exe)" -ForegroundColor Gray
     Write-Host ""
-    Write-Host "2. Sign up FREE (use Google/GitHub login)" -ForegroundColor White
+    Write-Host "2. Rename it to  cloudflared.exe  and place it:" -ForegroundColor White
+    Write-Host "   - Next to this script  (recommended), OR" -ForegroundColor Yellow
+    Write-Host "   - Anywhere on your PATH" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "3. After login, go to:" -ForegroundColor White
-    Write-Host "   https://dashboard.ngrok.com/get-started/your-authtoken" -ForegroundColor Cyan
+    Write-Host "3. Run this script again — no account or login needed!" -ForegroundColor White
     Write-Host ""
-    Write-Host "4. Copy your authtoken and run this command:" -ForegroundColor White
-    Write-Host "   ngrok config add-authtoken YOUR_TOKEN_HERE" -ForegroundColor Yellow
+    Write-Host "   (Drivers on the same WiFi can use the LAN URL below in the meantime)" -ForegroundColor Gray
+    $lanIp = (Get-NetIPAddress -AddressFamily IPv4 |
+        Where-Object { $_.IPAddress -notlike "127.*" -and $_.PrefixOrigin -ne "WellKnown" } |
+        Select-Object -First 1).IPAddress
+    if ($lanIp) { Write-Host "   http://${lanIp}:4000" -ForegroundColor Green }
     Write-Host ""
-    Write-Host "5. Then run this script again!" -ForegroundColor White
-    Write-Host ""
-    Write-Host "OR: Drivers can still use LAN URL if on same WiFi:" -ForegroundColor Gray
+    Write-Host "Press any key to exit..." -ForegroundColor Gray
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    exit
+}
 
-    # Show LAN IP
-    $lanIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike "127.*" -and $_.PrefixOrigin -ne "WellKnown" } | Select-Object -First 1).IPAddress
-    if ($lanIp) {
-        Write-Host "   http://${lanIp}:4000" -ForegroundColor Green
-    }
-} else {
-    # Start ngrok tunnel
-    Write-Host "Starting ngrok public tunnel..." -ForegroundColor Green
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "ngrok http 4000 --log=stdout" -WindowStyle Normal
+# ── Start Cloudflare Tunnel (quick / anonymous mode) ───────
+# Uses trycloudflare.com — completely free, no login, no account needed.
+# URL changes on every restart. For a FIXED permanent URL see CLOUDFLARE_TUNNEL.md.
+Write-Host "Starting Cloudflare Tunnel..." -ForegroundColor Green
 
-    Start-Sleep -Seconds 3
+$logFile = Join-Path $env:TEMP "cloudflared_shivam.log"
+Remove-Item $logFile -ErrorAction SilentlyContinue
 
-    # Get the public URL from ngrok API
-    try {
-        $tunnels = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels" -ErrorAction Stop
-        $publicUrl = $tunnels.tunnels | Where-Object { $_.proto -eq "https" } | Select-Object -ExpandProperty public_url -First 1
-        if (-not $publicUrl) {
-            $publicUrl = $tunnels.tunnels | Select-Object -ExpandProperty public_url -First 1
+# Run cloudflared minimized in the background, logging to a temp file so we
+# can parse the public URL without blocking this window.
+$cfArgs = "tunnel --url http://localhost:4000 --logfile `"$logFile`" --loglevel info"
+Start-Process -FilePath $cloudflaredCmd -ArgumentList $cfArgs -WindowStyle Minimized
+
+# Poll the log for up to ~20 seconds for the trycloudflare URL
+Write-Host "Waiting for tunnel URL" -ForegroundColor Cyan -NoNewline
+$publicUrl = $null
+for ($i = 0; $i -lt 40; $i++) {
+    Start-Sleep -Milliseconds 500
+    Write-Host "." -NoNewline -ForegroundColor Cyan
+    if (Test-Path $logFile) {
+        $content = Get-Content $logFile -Raw -ErrorAction SilentlyContinue
+        if ($content -match 'https://[a-z0-9\-]+\.trycloudflare\.com') {
+            $publicUrl = $Matches[0]
+            break
         }
-
-        Write-Host ""
-        Write-Host "========================================" -ForegroundColor Yellow
-        Write-Host "  SERVER IS LIVE — SHARE WITH DRIVERS" -ForegroundColor Green
-        Write-Host "========================================" -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "  PUBLIC URL (works from ANYWHERE):" -ForegroundColor White
-        Write-Host "  $publicUrl" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "  LAN URL (same WiFi only):" -ForegroundColor Gray
-        $lanIp = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike "127.*" -and $_.PrefixOrigin -ne "WellKnown" } | Select-Object -First 1).IPAddress
-        if ($lanIp) { Write-Host "  http://${lanIp}:4000" -ForegroundColor Gray }
-        Write-Host ""
-        Write-Host "  Admin login: http://localhost:4000" -ForegroundColor White
-        Write-Host "========================================" -ForegroundColor Yellow
-
-        # Copy URL to clipboard
-        $publicUrl | Set-Clipboard
-        Write-Host ""
-        Write-Host "  URL copied to clipboard!" -ForegroundColor Green
-
-    } catch {
-        Write-Host ""
-        Write-Host "Ngrok is starting... Check the ngrok window for your public URL." -ForegroundColor Yellow
-        Write-Host "Also check: http://localhost:4040" -ForegroundColor Cyan
     }
+}
+Write-Host ""
+
+# ── Print results ───────────────────────────────────────────
+if ($publicUrl) {
+    Write-Host ""
+    Write-Host "========================================" -ForegroundColor Yellow
+    Write-Host "  SERVER IS LIVE — SHARE WITH DRIVERS"  -ForegroundColor Green
+    Write-Host "========================================" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  PUBLIC URL (works from ANYWHERE):" -ForegroundColor White
+    Write-Host "  $publicUrl" -ForegroundColor Cyan
+    Write-Host ""
+    $lanIp = (Get-NetIPAddress -AddressFamily IPv4 |
+        Where-Object { $_.IPAddress -notlike "127.*" -and $_.PrefixOrigin -ne "WellKnown" } |
+        Select-Object -First 1).IPAddress
+    if ($lanIp) {
+        Write-Host "  LAN URL (same WiFi only):" -ForegroundColor Gray
+        Write-Host "  http://${lanIp}:4000" -ForegroundColor Gray
+    }
+    Write-Host ""
+    Write-Host "  Admin login: http://localhost:4000" -ForegroundColor White
+    Write-Host "========================================" -ForegroundColor Yellow
+
+    # Copy public URL to clipboard
+    $publicUrl | Set-Clipboard
+    Write-Host ""
+    Write-Host "  URL copied to clipboard!" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  NEXT STEP: Paste this URL into the app:" -ForegroundColor White
+    Write-Host "  Admin login -> Settings -> Driver Connection -> Server Address" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  NOTE: This URL changes every time you restart." -ForegroundColor Yellow
+    Write-Host "  For a FIXED permanent URL, see CLOUDFLARE_TUNNEL.md" -ForegroundColor Yellow
+} else {
+    Write-Host ""
+    Write-Host "  Tunnel started but URL was not detected in time." -ForegroundColor Yellow
+    Write-Host "  Check the log file for the URL:" -ForegroundColor Gray
+    Write-Host "  $logFile" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Or open Task Manager and look for cloudflared.exe" -ForegroundColor Gray
 }
 
 Write-Host ""
