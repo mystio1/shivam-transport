@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Shivam Transport — Keep Alive</title>
+<!--
+  Standalone keep-alive / health monitor.
+
+  Leave this page open in any browser tab (an old phone, the office PC, a spare
+  monitor) and it pings the backend's /api/health every few minutes so Render's
+  free plan never spins the service down.
+
+  Single self-contained file with no dependencies, so it can be hosted anywhere.
+  It ships in public/ (reachable at <server>/keepalive.html) and can equally be
+  dropped on Netlify, GitHub Pages, or opened straight from disk.
+
+    ?url=https://example.com   point it at a different backend (tunnel, LAN IP)
+    ?mins=3                    change the ping interval
+
+  Caveat worth knowing: this only pings while the tab is actually open. For
+  coverage that survives closing the laptop, use a server-side cron instead —
+  .github/workflows/keep-alive.yml, or cron-job.org / UptimeRobot.
+-->
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0e11;
+    --panel: #161a1e;
+    --line: #2b3139;
+    --text: #eaecef;
+    --muted: #848e9c;
+    --gold: #f0b90b;
+    --ok: #0ecb81;
+    --bad: #f6465d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px;
+    background: var(--bg); color: var(--text);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 620px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; word-break: break-all; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 18px; margin-bottom: 14px;
+  }
+  .status { display: flex; align-items: center; gap: 12px; }
+  .dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--muted); flex: none; transition: background .2s;
+  }
+  .dot.ok   { background: var(--ok);   box-shadow: 0 0 0 4px rgba(14,203,129,.15); }
+  .dot.bad  { background: var(--bad);  box-shadow: 0 0 0 4px rgba(246,70,93,.15); }
+  .dot.wait { background: var(--gold); box-shadow: 0 0 0 4px rgba(240,185,11,.15); }
+  .state { font-size: 17px; font-weight: 600; }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 12px; margin-top: 16px;
+  }
+  .stat { border-top: 1px solid var(--line); padding-top: 10px; }
+  .stat .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  .stat .v { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  button {
+    background: var(--gold); color: #12161c; border: 0; border-radius: 8px;
+    padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  #log { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow-y: auto; }
+  #log li {
+    display: flex; justify-content: space-between; gap: 12px;
+    padding: 6px 0; border-bottom: 1px solid var(--line);
+    font-size: 13px; font-variant-numeric: tabular-nums;
+  }
+  #log li:last-child { border-bottom: 0; }
+  #log .t { color: var(--muted); }
+  #log .ok { color: var(--ok); }
+  #log .bad { color: var(--bad); }
+  .note { color: var(--muted); font-size: 12px; margin: 16px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Keep Alive</h1>
+  <p class="sub" id="target"></p>
+
+  <div class="card">
+    <div class="status">
+      <span class="dot wait" id="dot"></span>
+      <span class="state" id="state">Starting…</span>
+    </div>
+    <div class="grid">
+      <div class="stat"><div class="k">Last ping</div><div class="v" id="last">—</div></div>
+      <div class="stat"><div class="k">Response</div><div class="v" id="ms">—</div></div>
+      <div class="stat"><div class="k">Server uptime</div><div class="v" id="up">—</div></div>
+      <div class="stat"><div class="k">OK / total</div><div class="v" id="tally">0 / 0</div></div>
+    </div>
+    <div class="row">
+      <button id="now">Ping now</button>
+      <button class="ghost" id="toggle">Pause</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Recent pings</h2>
+    <ul id="log"></ul>
+  </div>
+
+  <p class="note" id="note"></p>
+</main>
+
+<script>
+(function () {
+  var params = new URLSearchParams(location.search);
+
+  // Default to the origin this page is served from, so hosting it inside the app
+  // "just works". An explicit ?url= wins — that is how a copy on Netlify/Pages
+  // gets pointed at the Render deployment.
+  var base = (params.get('url') || location.origin).replace(/\/+$/, '');
+  if (!/^https?:\/\//.test(base)) base = 'https://' + base;
+
+  var mins = parseFloat(params.get('mins'));
+  if (!isFinite(mins) || mins <= 0) mins = 4;   // 4 min — safely under Render's ~15 min idle window
+  var intervalMs = mins * 60 * 1000;
+
+  var url = base + '/api/health';
+  var dot = document.getElementById('dot');
+  var state = document.getElementById('state');
+  var log = document.getElementById('log');
+  var timer = null, ok = 0, total = 0, running = true;
+
+  document.getElementById('target').textContent = url + '  ·  every ' + mins + ' min';
+  document.getElementById('note').textContent =
+    'This only pings while the tab stays open. For coverage when nobody is here, ' +
+    'point cron-job.org or UptimeRobot at the same URL.';
+
+  function fmtUptime(sec) {
+    if (typeof sec !== 'number') return '—';
+    var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+    return h ? h + 'h ' + m + 'm' : m + 'm';
+  }
+
+  function addRow(cls, text, ms) {
+    var li = document.createElement('li');
+    var t = document.createElement('span');
+    t.className = 't';
+    t.textContent = new Date().toLocaleTimeString();
+    var v = document.createElement('span');
+    v.className = cls;
+    v.textContent = text + (ms != null ? '  ·  ' + ms + ' ms' : '');
+    li.appendChild(t); li.appendChild(v);
+    log.insertBefore(li, log.firstChild);
+    while (log.children.length > 60) log.removeChild(log.lastChild);
+  }
+
+  function ping() {
+    var started = Date.now();
+    dot.className = 'dot wait';
+    state.textContent = 'Pinging…';
+
+    // cache: 'no-store' so a cached 200 can never masquerade as a live server.
+    fetch(url, { cache: 'no-store' })
+      .then(function (r) {
+        return r.json()
+          .catch(function () { return {}; })
+          .then(function (body) { return { r: r, body: body }; });
+      })
+      .then(function (res) {
+        var ms = Date.now() - started;
+        total++;
+        if (res.r.ok) {
+          ok++;
+          dot.className = 'dot ok';
+          // A multi-second response means we caught it mid-cold-start — worth showing,
+          // since that is exactly the delay this page exists to prevent.
+          state.textContent = ms > 5000 ? 'Awake (was cold)' : 'Awake';
+          document.getElementById('up').textContent = fmtUptime(res.body.uptime);
+          addRow('ok', 'HTTP ' + res.r.status, ms);
+        } else {
+          dot.className = 'dot bad';
+          state.textContent = 'Error ' + res.r.status;
+          addRow('bad', 'HTTP ' + res.r.status, ms);
+        }
+        document.getElementById('ms').textContent = ms + ' ms';
+        document.getElementById('last').textContent = new Date().toLocaleTimeString();
+        document.getElementById('tally').textContent = ok + ' / ' + total;
+      })
+      .catch(function (e) {
+        total++;
+        dot.className = 'dot bad';
+        state.textContent = 'Unreachable';
+        document.getElementById('ms').textContent = '—';
+        document.getElementById('last').textContent = new Date().toLocaleTimeString();
+        document.getElementById('tally').textContent = ok + ' / ' + total;
+        addRow('bad', String((e && e.message) || 'network error'), null);
+      });
+  }
+
+  function start() { if (!timer) timer = setInterval(ping, intervalMs); }
+  function stop()  { if (timer) { clearInterval(timer); timer = null; } }
+
+  document.getElementById('now').addEventListener('click', ping);
+  document.getElementById('toggle').addEventListener('click', function () {
+    running = !running;
+    this.textContent = running ? 'Pause' : 'Resume';
+    if (running) { start(); ping(); }
+    else { stop(); state.textContent = 'Paused'; dot.className = 'dot'; }
+  });
+
+  // Background tabs get their timers throttled hard by every modern browser, so
+  // re-ping the moment we return to the foreground rather than trusting the interval.
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && running) ping();
+  });
+
+  ping();
+  start();
+})();
+</script>
+</body>
+</html>

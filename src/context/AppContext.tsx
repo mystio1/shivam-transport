@@ -19,9 +19,30 @@ import { enqueueTrip, generateClientRequestId, getQueueCount, getQueuedTrips, re
 import { scheduleDocumentReminders } from '../utils/documentReminders';
 import { documentStatus, type DocumentStatus } from '../utils/documentStatus';
 import { TOKEN_KEY, getApiBase, setApiBase } from '../utils/serverConnection';
+import { useKeepAlive } from '../hooks/useKeepAlive';
 
 const DOC_NOTIF_PREFS_KEY = 'shivam_doc_notif_prefs';
 const DOC_REMINDER_SNOOZE_MS = 24 * 60 * 60 * 1000;
+
+// Last-known session snapshot, so a cold app start can render the real UI immediately (native-app
+// feel) instead of blocking behind a network round-trip to /api/me — which, against a Render free
+// instance woken from sleep, can take 30+ seconds and makes the app feel like a slow website load.
+// The mount effect below still re-validates against the server right away; this is only what's
+// shown while that's in flight.
+const ME_CACHE_KEY = 'shivam_cached_me';
+
+function getCachedMe(): { user: AppUser; group: AppGroup } | null {
+  try {
+    const raw = localStorage.getItem(ME_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function setCachedMe(user: AppUser, group: AppGroup) {
+  localStorage.setItem(ME_CACHE_KEY, JSON.stringify({ user, group }));
+}
 
 // Keyed by document id. Kept per-browser (not synced to the server) since it's a personal
 // "stop bugging me about this one" preference, not shared account data. `expiryDate` pins the
@@ -176,9 +197,20 @@ interface ApiOptions {
 }
 
 // Thrown when the server was reached but rejected the request (validation, auth, etc.).
+// Carries `status` so callers can distinguish a 401 (truly expired token) from a 5xx or
+// network error (server sleeping / unreachable) — only the former should force a logout.
 // Any OTHER error out of apiRequest (fetch itself throwing) means the server was unreachable —
 // that distinction is what lets submitDriverTrip decide "queue for later" vs "show the error now".
-export class ApiError extends Error {}
+export class ApiError extends Error {
+  // Declared as a plain field + assignment rather than a constructor parameter
+  // property: `erasableSyntaxOnly` (tsconfig.app.json) rejects the shorthand.
+  readonly status?: number;
+
+  constructor(message: string, status?: number) {
+    super(message);
+    this.status = status;
+  }
+}
 
 async function apiRequest<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const storedToken = options.token !== undefined ? options.token : localStorage.getItem(TOKEN_KEY);
@@ -192,7 +224,10 @@ async function apiRequest<T>(path: string, options: ApiOptions = {}): Promise<T>
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new ApiError((data as { message?: string }).message || 'Request failed');
+    throw new ApiError(
+      (data as { message?: string }).message || 'Request failed',
+      response.status,
+    );
   }
   return data as T;
 }
@@ -214,10 +249,10 @@ export const AppProvider = ({ children }: AppProviderProps) => {
   const [allTrips, setAllTrips]   = useState<Trip[]>([]);
   const [drivers, setDrivers]     = useState<AppUser[]>([]);
   const [isLoading, setIsLoading]   = useState(false);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(() => !!localStorage.getItem(TOKEN_KEY) && !getCachedMe());
   const [themeMode, setThemeMode]   = useState<PaletteMode>(getStoredThemeMode);
-  const [user, setUser]   = useState<AppUser | null>(null);
-  const [group, setGroup] = useState<AppGroup | null>(null);
+  const [user, setUser]   = useState<AppUser | null>(() => getCachedMe()?.user ?? null);
+  const [group, setGroup] = useState<AppGroup | null>(() => getCachedMe()?.group ?? null);
   const [branding, setBranding] = useState<Branding | null>(null);
   const [serverUrl, setServerUrlState] = useState<string>(getApiBase());
   const [pendingSyncCount, setPendingSyncCount] = useState<number>(() => getQueueCount());
@@ -226,6 +261,11 @@ export const AppProvider = ({ children }: AppProviderProps) => {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [tripEditRequests, setTripEditRequests] = useState<TripEditRequest[]>([]);
   const [docNotifPrefs, setDocNotifPrefs] = useState<Record<string, DocumentReminderPref>>(loadDocNotifPrefs);
+
+  // ── Keep-alive: prevent Render free-tier sleep ────────────────────────
+  // Pings /api/health every 4 min while the tab is visible and a token exists.
+  // No state, no re-renders — just a fire-and-forget fetch on a timer.
+  useKeepAlive();
 
   const trips = useMemo(() => allTrips.filter(approvedTrip), [allTrips]);
   const pendingTrips = useMemo(
@@ -238,6 +278,7 @@ export const AppProvider = ({ children }: AppProviderProps) => {
 
   const clearSession = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(ME_CACHE_KEY);
     setUser(null);
     setGroup(null);
     setCustomers([]);
@@ -287,9 +328,25 @@ export const AppProvider = ({ children }: AppProviderProps) => {
       .then(me => {
         setUser(me.user);
         setGroup(me.group);
+        setCachedMe(me.user, me.group);
       })
-      .catch(() => {
-        localStorage.removeItem(TOKEN_KEY); // expired or invalid
+      .catch((err: unknown) => {
+        // Only clear the session when the server explicitly rejects the token (401
+        // Unauthorized) — meaning the token is genuinely expired or revoked.
+        //
+        // A plain network error (fetch throws, no response) or a 5xx means the
+        // Render server is still waking from sleep — the token is almost certainly
+        // still valid, so we keep the cached session alive and let the user continue
+        // using the app. The SSE connection will catch up once the server is back.
+        if (err instanceof ApiError && err.status === 401) {
+          localStorage.removeItem(TOKEN_KEY);
+          localStorage.removeItem(ME_CACHE_KEY);
+          setUser(null);
+          setGroup(null);
+        }
+        // For any other error (server sleeping, network blip, 5xx) we leave the
+        // cached user/group in state — the UI stays usable and re-validates
+        // automatically when the server comes back up.
       })
       .finally(() => setAuthLoading(false));
   }, []);
@@ -373,6 +430,7 @@ export const AppProvider = ({ children }: AppProviderProps) => {
       apiRequest<{ user: AppUser; group: AppGroup }>('/api/me').then(me => {
         setUser(me.user);
         setGroup(me.group);
+        setCachedMe(me.user, me.group);
       }).catch(() => {});
     });
     // Deliberately NOT closing here — the browser's native EventSource already retries on its own
@@ -400,6 +458,7 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     localStorage.setItem(TOKEN_KEY, result.token);
     setUser(result.user);
     setGroup(result.group);
+    setCachedMe(result.user, result.group);
   };
 
   const signup = async (input: SignupInput): Promise<{ groupCode: string | null }> => {
@@ -410,6 +469,7 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     localStorage.setItem(TOKEN_KEY, result.token);
     setUser(result.user);
     setGroup(result.group);
+    setCachedMe(result.user, result.group);
     return { groupCode: input.role === 'admin' ? result.group.code : null };
   };
 
@@ -446,6 +506,7 @@ export const AppProvider = ({ children }: AppProviderProps) => {
     localStorage.setItem(TOKEN_KEY, result.token);
     setUser(result.user);
     setGroup(result.group);
+    setCachedMe(result.user, result.group);
   };
 
   // Freezes/unfreezes a business from the /support console — the target business's own devices

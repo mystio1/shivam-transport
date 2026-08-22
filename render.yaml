@@ -14,7 +14,11 @@ services:
     runtime: node
     plan: starter
     autoDeploy: false
-    buildCommand: npm ci && npx prisma generate && npm run build && npm run build:backend
+    # --include=dev is REQUIRED because NODE_ENV=production (set below) makes npm omit
+    # devDependencies by default — and vite, typescript, @vitejs/plugin-react-swc and prisma
+    # all live there while being needed at build time. Without it the build dies with
+    # "Cannot find module 'vite'" and a cascade of missing-type errors from vite/client.
+    buildCommand: npm ci --include=dev && npx prisma generate && npm run build && npm run build:backend
     # Deliberately does NOT run `prisma migrate deploy` here. Supabase's Supavisor pooler doesn't
     # support the session-level advisory lock Prisma's migration engine needs, so `migrate deploy`
     # (like `migrate dev`/`migrate status` before it) hangs indefinitely rather than erroring —
