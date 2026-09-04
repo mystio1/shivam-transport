@@ -14,7 +14,12 @@ import ForgotPasswordDialog from '../components/ForgotPasswordDialog';
 const AuthPage = () => {
   const theme = useTheme();
   const { login, signup, serverUrl, saveServerUrl } = useAppContext();
-  const [isSignup, setIsSignup] = useState(false);
+  // This page has no neutral "choose" screen of its own - it defaults straight to Login.
+  // TrackMarg's hub sends `?mode=signup` for its Get Started flow (and `?mode=login`, same as
+  // the default, for Log In) so arriving here to create an account doesn't land on Login first.
+  const [isSignup, setIsSignup] = useState(
+    () => new URLSearchParams(window.location.search).get('mode') === 'signup',
+  );
   const [role, setRole] = useState<UserRole>('admin');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
