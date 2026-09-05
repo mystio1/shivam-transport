@@ -44,6 +44,17 @@ function setCachedMe(user: AppUser, group: AppGroup) {
   localStorage.setItem(ME_CACHE_KEY, JSON.stringify({ user, group }));
 }
 
+// TrackMarg's Get Started flow sends `?mode=signup` to mean "start fresh" - but `user`/`group`
+// below are seeded synchronously from whatever is cached in THIS browser, so a leftover session
+// from earlier testing or a previous account would render the logged-in dashboard immediately,
+// before AuthPage ever gets a chance to show signup. Clearing it here, at module scope, runs
+// before AppProvider's useState calls read the cache, which a useEffect (runs after the first
+// render) would be one render too late for.
+if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mode') === 'signup') {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(ME_CACHE_KEY);
+}
+
 // Keyed by document id. Kept per-browser (not synced to the server) since it's a personal
 // "stop bugging me about this one" preference, not shared account data. `expiryDate` pins the
 // preference to the document's CURRENT expiry — renewing the document (a new expiryDate) makes
