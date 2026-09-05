@@ -8,11 +8,16 @@ import DarkModeIcon from '@mui/icons-material/DarkMode';
 import { useState } from 'react';
 import DataBackupRestore from './DataBackupRestore';
 import LogoutIcon from '@mui/icons-material/Logout';
+import HomeIcon from '@mui/icons-material/Home';
 import { useAppContext } from '../context/AppContext';
 import NotificationCenter from './NotificationCenter';
 interface HeaderProps {
   handleDrawerToggle?: () => void;
 }
+
+// Same VITE_TRACKMARG_URL convention as Ledger+'s Settings screen - overridable per-build so
+// this can be pointed at the real hub the moment it has a home, with no code change.
+const TRACKMARG_HUB_URL = import.meta.env.VITE_TRACKMARG_URL || 'https://trackmarg.in';
 
 const Header = ({ handleDrawerToggle }: HeaderProps) => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
@@ -123,6 +128,32 @@ const Header = ({ handleDrawerToggle }: HeaderProps) => {
           >
             <SettingsIcon />
           </IconButton>
+
+          {/* Icon-only on phone screens — the text button below is desktop-only */}
+          <Tooltip title="Exit to TrackMarg">
+            <IconButton
+              onClick={() => { window.location.href = TRACKMARG_HUB_URL; }}
+              aria-label="exit to trackmarg"
+              sx={{
+                display: { xs: 'inline-flex', sm: 'none' },
+                color: 'text.secondary',
+                '&:hover': { color: '#F0B90B', backgroundColor: 'divider' },
+              }}
+            >
+              <HomeIcon />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="Exit to TrackMarg">
+            <Button
+              onClick={() => { window.location.href = TRACKMARG_HUB_URL; }}
+              color="inherit"
+              startIcon={<HomeIcon />}
+              sx={{ ml: 1, color: 'text.secondary', display: { xs: 'none', sm: 'inline-flex' } }}
+            >
+              Exit to TrackMarg
+            </Button>
+          </Tooltip>
 
           {/* Icon-only logout on phone screens — the text button below is desktop-only */}
           <Tooltip title="Logout">
