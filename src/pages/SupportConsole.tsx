@@ -175,8 +175,35 @@ const SupportConsole = () => {
   // ── Password gate ─────────────────────────────────────────────────────────
   if (!supportToken) {
     return (
-      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default', p: 2 }}>
-        <Paper elevation={0} sx={{ p: 4, maxWidth: 400, width: '100%', border: `1px solid ${theme.palette.divider}` }}>
+      <Box
+        sx={{
+          minHeight: '100vh',
+          width: '100%',
+          backgroundImage: `linear-gradient(rgba(11, 14, 17, 0.65), rgba(11, 14, 17, 0.85)), url(/login-bg.jpg)`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center center',
+          backgroundRepeat: 'no-repeat',
+          backgroundAttachment: 'fixed',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          p: 2,
+        }}
+      >
+        <Paper
+          elevation={24}
+          sx={{
+            p: 4,
+            maxWidth: 400,
+            width: '100%',
+            bgcolor: theme.palette.mode === 'dark' ? 'rgba(18, 24, 38, 0.85)' : 'rgba(255, 255, 255, 0.90)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            border: `1px solid ${theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)'}`,
+            borderRadius: 3,
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.45)',
+          }}
+        >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1 }}>
             <VpnKey sx={{ color: '#F0B90B' }} />
             <Typography variant="h5" sx={{ fontWeight: 800, color: 'text.primary' }}>Support Console</Typography>

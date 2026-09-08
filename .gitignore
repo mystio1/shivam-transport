@@ -40,3 +40,7 @@ backend/data/
 
 # Leftover from an earlier, unused deployment attempt (this app is self-hosted, not on Vercel)
 .vercel
+
+# Local build archives and scratch media - never belong in the repo
+*.zip
+*.mp4

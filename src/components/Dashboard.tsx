@@ -319,86 +319,86 @@ const Dashboard = () => {
 
       {/* KPI Cards */}
       {showSkeleton ? <StatCardsSkeleton count={4} /> : (
-      <Box
-        sx={{
-          display: 'grid',
-          gridTemplateColumns: {
-            xs: 'repeat(2, 1fr)',
-            sm: 'repeat(2, 1fr)',
-            md: 'repeat(4, 1fr)',
-          },
-          gap: { xs: 1.5, sm: 2.5 },
-        }}
-      >
-        {kpiCards.map(card => (
-          <Card
-            key={card.key}
-            onClick={card.onClick}
-            sx={{
-              height: '100%',
-              minHeight: 0,
-              borderRadius: { xs: 3, sm: 4 },
-              background: theme.palette.background.paper,
-              borderTop: `3px solid ${card.color}`,
-              color: 'text.primary',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-              transition: 'transform 0.25s, box-shadow 0.25s',
-              cursor: card.onClick ? 'pointer' : 'default',
-              '&:hover': card.onClick ? { transform: 'translateY(-3px)', boxShadow: `0 8px 24px ${card.color}22` } : {},
-            }}
-          >
-            <CardContent sx={{ p: { xs: 1.5, sm: 2.25 }, '&:last-child': { pb: { xs: 1.5, sm: 2.25 } } }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1, gap: 0.5 }}>
-                <Typography sx={{ fontWeight: 600, color: 'text.secondary', fontSize: 'clamp(11px, 1.1vw, 14px)' }}>
-                  {card.label}
-                </Typography>
-                <Avatar sx={{ bgcolor: `${card.color}22`, color: card.color, width: { xs: 28, sm: 40 }, height: { xs: 28, sm: 40 }, flexShrink: 0 }}>
-                  {card.icon}
-                </Avatar>
-              </Box>
-              <Typography
-                sx={{
-                  fontWeight: 800, color: 'text.primary', lineHeight: 1.1,
-                  fontSize: 'clamp(18px, 2.6vw, 32px)',
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block',
-                }}
-              >
-                {card.value}
-              </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 0.75, gap: 1 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4 }}>
-                  {card.trendVal.up ? (
-                    <TrendingUp sx={{ fontSize: 14, color: '#0ECB81' }} />
-                  ) : (
-                    <TrendingDown sx={{ fontSize: 14, color: '#F6465D' }} />
-                  )}
-                  <Typography sx={{ fontSize: 'clamp(10px, 0.9vw, 12px)', fontWeight: 700, color: card.trendVal.up ? '#0ECB81' : '#F6465D' }}>
-                    {card.trendVal.pct}%
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: {
+              xs: 'repeat(2, 1fr)',
+              sm: 'repeat(2, 1fr)',
+              md: 'repeat(4, 1fr)',
+            },
+            gap: { xs: 1.5, sm: 2.5 },
+          }}
+        >
+          {kpiCards.map(card => (
+            <Card
+              key={card.key}
+              onClick={card.onClick}
+              sx={{
+                height: '100%',
+                minHeight: 0,
+                borderRadius: { xs: 3, sm: 4 },
+                background: theme.palette.background.paper,
+                borderTop: `3px solid ${card.color}`,
+                color: 'text.primary',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                transition: 'transform 0.25s, box-shadow 0.25s',
+                cursor: card.onClick ? 'pointer' : 'default',
+                '&:hover': card.onClick ? { transform: 'translateY(-3px)', boxShadow: `0 8px 24px ${card.color}22` } : {},
+              }}
+            >
+              <CardContent sx={{ p: { xs: 1.5, sm: 2.25 }, '&:last-child': { pb: { xs: 1.5, sm: 2.25 } } }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1, gap: 0.5 }}>
+                  <Typography sx={{ fontWeight: 600, color: 'text.secondary', fontSize: 'clamp(11px, 1.1vw, 14px)' }}>
+                    {card.label}
                   </Typography>
-                  <Typography sx={{ fontSize: 'clamp(9px, 0.8vw, 11px)', color: 'text.secondary', display: { xs: 'none', sm: 'inline' } }}>
-                    vs last {rangeDays}d
-                  </Typography>
+                  <Avatar sx={{ bgcolor: `${card.color}22`, color: card.color, width: { xs: 28, sm: 40 }, height: { xs: 28, sm: 40 }, flexShrink: 0 }}>
+                    {card.icon}
+                  </Avatar>
                 </Box>
-                {card.sparkline && (
-                  <Box sx={{ width: { xs: 44, sm: 64 }, height: 24 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={card.sparkline} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-                        <defs>
-                          <linearGradient id={`spark-${card.key}`} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor={card.color} stopOpacity={0.5} />
-                            <stop offset="100%" stopColor={card.color} stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <Area type="monotone" dataKey="value" stroke={card.color} strokeWidth={1.5} fill={`url(#spark-${card.key})`} isAnimationActive={false} />
-                      </AreaChart>
-                    </ResponsiveContainer>
+                <Typography
+                  sx={{
+                    fontWeight: 800, color: 'text.primary', lineHeight: 1.1,
+                    fontSize: 'clamp(18px, 2.6vw, 32px)',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block',
+                  }}
+                >
+                  {card.value}
+                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 0.75, gap: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4 }}>
+                    {card.trendVal.up ? (
+                      <TrendingUp sx={{ fontSize: 14, color: '#0ECB81' }} />
+                    ) : (
+                      <TrendingDown sx={{ fontSize: 14, color: '#F6465D' }} />
+                    )}
+                    <Typography sx={{ fontSize: 'clamp(10px, 0.9vw, 12px)', fontWeight: 700, color: card.trendVal.up ? '#0ECB81' : '#F6465D' }}>
+                      {card.trendVal.pct}%
+                    </Typography>
+                    <Typography sx={{ fontSize: 'clamp(9px, 0.8vw, 11px)', color: 'text.secondary', display: { xs: 'none', sm: 'inline' } }}>
+                      vs last {rangeDays}d
+                    </Typography>
                   </Box>
-                )}
-              </Box>
-            </CardContent>
-          </Card>
-        ))}
-      </Box>
+                  {card.sparkline && (
+                    <Box sx={{ width: { xs: 44, sm: 64 }, height: 24 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={card.sparkline} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
+                          <defs>
+                            <linearGradient id={`spark-${card.key}`} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor={card.color} stopOpacity={0.5} />
+                              <stop offset="100%" stopColor={card.color} stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <Area type="monotone" dataKey="value" stroke={card.color} strokeWidth={1.5} fill={`url(#spark-${card.key})`} isAnimationActive={false} />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </Box>
+                  )}
+                </Box>
+              </CardContent>
+            </Card>
+          ))}
+        </Box>
       )}
 
       {/* Revenue chart + Collection donut + Today's summary */}
@@ -409,128 +409,128 @@ const Dashboard = () => {
           <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, border: `1px solid ${theme.palette.divider}` }}><PanelSkeleton height={170} /></Paper>
         </Box>
       ) : (
-      <Box
-        sx={{
-          display: 'grid',
-          gridTemplateColumns: { xs: '1fr', lg: '1.6fr 1fr 1fr' },
-          gap: { xs: 2, sm: 2.5 },
-          alignItems: 'stretch',
-        }}
-      >
-        <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}`, minWidth: 0 }}>
-          <Typography sx={{ fontWeight: 700, color: 'text.primary', fontSize: 'clamp(14px, 1.2vw, 18px)', mb: 0.5 }}>
-            Revenue Overview
-          </Typography>
-          <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(12px, 1vw, 14px)', mb: 1 }}>
-            Total revenue ₹{totalRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })} · <Box component="span" sx={{ color: '#0ECB81' }}>● Collected</Box> <Box component="span" sx={{ color: '#F6465D' }}>● Pending</Box>
-          </Typography>
-          <Box sx={{ width: '100%', height: { xs: 200, sm: 260 } }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={dailySeries} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="collectedGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#0ECB81" stopOpacity={0.4} />
-                    <stop offset="100%" stopColor="#0ECB81" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="pendingGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#F6465D" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="#F6465D" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={theme.palette.divider} vertical={false} />
-                <XAxis dataKey="date" stroke={theme.palette.text.secondary} fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis stroke={theme.palette.text.secondary} fontSize={11} tickLine={false} axisLine={false} width={44} />
-                <RTooltip contentStyle={{ background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}`, borderRadius: 8, color: theme.palette.text.primary }} />
-                <Area type="monotone" dataKey="collected" name="Collected" stroke="#0ECB81" strokeWidth={2} fill="url(#collectedGrad)" isAnimationActive={false} />
-                <Area type="monotone" dataKey="pending" name="Pending" stroke="#F6465D" strokeWidth={2} fill="url(#pendingGrad)" isAnimationActive={false} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </Box>
-        </Paper>
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', lg: '1.6fr 1fr 1fr' },
+            gap: { xs: 2, sm: 2.5 },
+            alignItems: 'stretch',
+          }}
+        >
+          <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}`, minWidth: 0 }}>
+            <Typography sx={{ fontWeight: 700, color: 'text.primary', fontSize: 'clamp(14px, 1.2vw, 18px)', mb: 0.5 }}>
+              Revenue Overview
+            </Typography>
+            <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(12px, 1vw, 14px)', mb: 1 }}>
+              Total revenue ₹{totalRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })} · <Box component="span" sx={{ color: '#0ECB81' }}>● Collected</Box> <Box component="span" sx={{ color: '#F6465D' }}>● Pending</Box>
+            </Typography>
+            <Box sx={{ width: '100%', height: { xs: 200, sm: 260 } }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={dailySeries} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="collectedGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#0ECB81" stopOpacity={0.4} />
+                      <stop offset="100%" stopColor="#0ECB81" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="pendingGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#F6465D" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="#F6465D" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke={theme.palette.divider} vertical={false} />
+                  <XAxis dataKey="date" stroke={theme.palette.text.secondary} fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis stroke={theme.palette.text.secondary} fontSize={11} tickLine={false} axisLine={false} width={44} />
+                  <RTooltip contentStyle={{ background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}`, borderRadius: 8, color: theme.palette.text.primary }} />
+                  <Area type="monotone" dataKey="collected" name="Collected" stroke="#0ECB81" strokeWidth={2} fill="url(#collectedGrad)" isAnimationActive={false} />
+                  <Area type="monotone" dataKey="pending" name="Pending" stroke="#F6465D" strokeWidth={2} fill="url(#pendingGrad)" isAnimationActive={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </Box>
+          </Paper>
 
-        <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}`, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <Typography sx={{ fontWeight: 700, color: 'text.primary', fontSize: 'clamp(14px, 1.2vw, 18px)', mb: 1 }}>
-            Collection Summary
-          </Typography>
-          <Box sx={{ position: 'relative', width: '100%', height: { xs: 140, sm: 170 } }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={[{ name: 'Collected', value: collectedRevenue || 0.0001 }, { name: 'Pending', value: pendingRevenue || 0 }]}
-                  dataKey="value" innerRadius="68%" outerRadius="100%" startAngle={90} endAngle={-270} isAnimationActive={false}
-                >
-                  {DONUT_COLORS.map(color => <Cell key={color} fill={color} stroke="none" />)}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-            <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-              <Typography sx={{ fontWeight: 800, color: 'text.primary', fontSize: 'clamp(20px, 2vw, 26px)' }}>{collectedPct}%</Typography>
-              <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(10px, 0.9vw, 12px)' }}>Collected</Typography>
-            </Box>
-          </Box>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, mt: 1.5 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Typography sx={{ display: 'flex', alignItems: 'center', gap: 0.75, color: 'text.secondary', fontSize: 'clamp(11px, 1vw, 13px)' }}>
-                <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#0ECB81' }} /> Collected
-              </Typography>
-              <Typography sx={{ color: 'text.primary', fontWeight: 700, fontSize: 'clamp(11px, 1vw, 13px)' }}>
-                ₹{collectedRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-              </Typography>
-            </Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Typography sx={{ display: 'flex', alignItems: 'center', gap: 0.75, color: 'text.secondary', fontSize: 'clamp(11px, 1vw, 13px)' }}>
-                <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#F6465D' }} /> Pending
-              </Typography>
-              <Typography sx={{ color: 'text.primary', fontWeight: 700, fontSize: 'clamp(11px, 1vw, 13px)' }}>
-                ₹{pendingRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-              </Typography>
-            </Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', pt: 0.75, mt: 0.5, borderTop: `1px solid ${theme.palette.divider}` }}>
-              <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(11px, 1vw, 13px)', fontWeight: 700 }}>Total Revenue</Typography>
-              <Typography sx={{ color: '#F0B90B', fontWeight: 800, fontSize: 'clamp(11px, 1vw, 13px)' }}>
-                ₹{totalRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-              </Typography>
-            </Box>
-          </Box>
-        </Paper>
-
-        <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}`, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          <Typography sx={{ fontWeight: 700, color: 'text.primary', fontSize: 'clamp(14px, 1.2vw, 18px)' }}>
-            Today's Summary
-          </Typography>
-          <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: 'action.hover', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, minWidth: 0 }}>
-              <Avatar sx={{ bgcolor: 'rgba(240,185,11,0.12)', color: '#F0B90B', width: 36, height: 36 }}><LocalShipping fontSize="small" /></Avatar>
-              <Box sx={{ minWidth: 0 }}>
-                <Typography sx={{ fontWeight: 800, color: 'text.primary', fontSize: 'clamp(16px, 1.6vw, 20px)' }}>{todaysTrips.length}</Typography>
-                <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(10px, 0.9vw, 12px)' }}>Total Trips</Typography>
+          <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}`, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+            <Typography sx={{ fontWeight: 700, color: 'text.primary', fontSize: 'clamp(14px, 1.2vw, 18px)', mb: 1 }}>
+              Collection Summary
+            </Typography>
+            <Box sx={{ position: 'relative', width: '100%', height: { xs: 140, sm: 170 } }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={[{ name: 'Collected', value: collectedRevenue || 0.0001 }, { name: 'Pending', value: pendingRevenue || 0 }]}
+                    dataKey="value" innerRadius="68%" outerRadius="100%" startAngle={90} endAngle={-270} isAnimationActive={false}
+                  >
+                    {DONUT_COLORS.map(color => <Cell key={color} fill={color} stroke="none" />)}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+              <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                <Typography sx={{ fontWeight: 800, color: 'text.primary', fontSize: 'clamp(20px, 2vw, 26px)' }}>{collectedPct}%</Typography>
+                <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(10px, 0.9vw, 12px)' }}>Collected</Typography>
               </Box>
             </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4 }}>
-              {todaysTripsTrend.up ? <TrendingUp sx={{ fontSize: 14, color: '#0ECB81' }} /> : <TrendingDown sx={{ fontSize: 14, color: '#F6465D' }} />}
-              <Typography sx={{ fontSize: 'clamp(10px, 0.9vw, 12px)', fontWeight: 700, color: todaysTripsTrend.up ? '#0ECB81' : '#F6465D' }}>{todaysTripsTrend.pct}%</Typography>
-            </Box>
-          </Box>
-          <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: 'action.hover', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, minWidth: 0 }}>
-              <Avatar sx={{ bgcolor: 'rgba(14,203,129,0.12)', color: '#0ECB81', width: 36, height: 36 }}><AccountBalanceWallet fontSize="small" /></Avatar>
-              <Box sx={{ minWidth: 0 }}>
-                <Typography sx={{ fontWeight: 800, color: 'text.primary', fontSize: 'clamp(16px, 1.6vw, 20px)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  ₹{todaysRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, mt: 1.5 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                <Typography sx={{ display: 'flex', alignItems: 'center', gap: 0.75, color: 'text.secondary', fontSize: 'clamp(11px, 1vw, 13px)' }}>
+                  <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#0ECB81' }} /> Collected
                 </Typography>
-                <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(10px, 0.9vw, 12px)' }}>Total Revenue</Typography>
+                <Typography sx={{ color: 'text.primary', fontWeight: 700, fontSize: 'clamp(11px, 1vw, 13px)' }}>
+                  ₹{collectedRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                </Typography>
+              </Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                <Typography sx={{ display: 'flex', alignItems: 'center', gap: 0.75, color: 'text.secondary', fontSize: 'clamp(11px, 1vw, 13px)' }}>
+                  <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#F6465D' }} /> Pending
+                </Typography>
+                <Typography sx={{ color: 'text.primary', fontWeight: 700, fontSize: 'clamp(11px, 1vw, 13px)' }}>
+                  ₹{pendingRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                </Typography>
+              </Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', pt: 0.75, mt: 0.5, borderTop: `1px solid ${theme.palette.divider}` }}>
+                <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(11px, 1vw, 13px)', fontWeight: 700 }}>Total Revenue</Typography>
+                <Typography sx={{ color: '#F0B90B', fontWeight: 800, fontSize: 'clamp(11px, 1vw, 13px)' }}>
+                  ₹{totalRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                </Typography>
               </Box>
             </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4 }}>
-              {todaysRevenueTrend.up ? <TrendingUp sx={{ fontSize: 14, color: '#0ECB81' }} /> : <TrendingDown sx={{ fontSize: 14, color: '#F6465D' }} />}
-              <Typography sx={{ fontSize: 'clamp(10px, 0.9vw, 12px)', fontWeight: 700, color: todaysRevenueTrend.up ? '#0ECB81' : '#F6465D' }}>{todaysRevenueTrend.pct}%</Typography>
+          </Paper>
+
+          <Paper elevation={0} sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: 3, background: theme.palette.background.paper, border: `1px solid ${theme.palette.divider}`, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            <Typography sx={{ fontWeight: 700, color: 'text.primary', fontSize: 'clamp(14px, 1.2vw, 18px)' }}>
+              Today's Summary
+            </Typography>
+            <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: 'action.hover', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, minWidth: 0 }}>
+                <Avatar sx={{ bgcolor: 'rgba(240,185,11,0.12)', color: '#F0B90B', width: 36, height: 36 }}><LocalShipping fontSize="small" /></Avatar>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography sx={{ fontWeight: 800, color: 'text.primary', fontSize: 'clamp(16px, 1.6vw, 20px)' }}>{todaysTrips.length}</Typography>
+                  <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(10px, 0.9vw, 12px)' }}>Total Trips</Typography>
+                </Box>
+              </Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4 }}>
+                {todaysTripsTrend.up ? <TrendingUp sx={{ fontSize: 14, color: '#0ECB81' }} /> : <TrendingDown sx={{ fontSize: 14, color: '#F6465D' }} />}
+                <Typography sx={{ fontSize: 'clamp(10px, 0.9vw, 12px)', fontWeight: 700, color: todaysTripsTrend.up ? '#0ECB81' : '#F6465D' }}>{todaysTripsTrend.pct}%</Typography>
+              </Box>
             </Box>
-          </Box>
-          <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(10px, 0.9vw, 12px)', mt: 'auto' }}>
-            Compared to yesterday
-          </Typography>
-        </Paper>
-      </Box>
+            <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: 'action.hover', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, minWidth: 0 }}>
+                <Avatar sx={{ bgcolor: 'rgba(14,203,129,0.12)', color: '#0ECB81', width: 36, height: 36 }}><AccountBalanceWallet fontSize="small" /></Avatar>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography sx={{ fontWeight: 800, color: 'text.primary', fontSize: 'clamp(16px, 1.6vw, 20px)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    ₹{todaysRevenue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                  </Typography>
+                  <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(10px, 0.9vw, 12px)' }}>Total Revenue</Typography>
+                </Box>
+              </Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.4 }}>
+                {todaysRevenueTrend.up ? <TrendingUp sx={{ fontSize: 14, color: '#0ECB81' }} /> : <TrendingDown sx={{ fontSize: 14, color: '#F6465D' }} />}
+                <Typography sx={{ fontSize: 'clamp(10px, 0.9vw, 12px)', fontWeight: 700, color: todaysRevenueTrend.up ? '#0ECB81' : '#F6465D' }}>{todaysRevenueTrend.pct}%</Typography>
+              </Box>
+            </Box>
+            <Typography sx={{ color: 'text.secondary', fontSize: 'clamp(10px, 0.9vw, 12px)', mt: 'auto' }}>
+              Compared to yesterday
+            </Typography>
+          </Paper>
+        </Box>
       )}
 
       {/* Recent Trips + Top Customers */}
