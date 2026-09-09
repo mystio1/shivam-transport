@@ -103,7 +103,22 @@ export interface SignupInput {
 export interface LoginInput {
   phone: string;
   password: string;
+  // Optional — login no longer requires a group code (a phone number is only unique WITHIN a
+  // group server-side). Only sent when completing the multi-account picker below.
+  groupCode?: string;
+}
+
+// Returned by login() when the same phone + password are valid for more than one business (see
+// the comment in backend/src/routes/auth.routes.ts) — no session is issued yet. The caller shows
+// a one-tap picker and re-calls login() with the chosen groupCode to finish.
+export interface LoginAccountChoice {
   groupCode: string;
+  groupName: string;
+}
+
+export interface LoginResult {
+  requiresGroupSelection?: boolean;
+  accounts?: LoginAccountChoice[];
 }
 
 interface AppContextType {
@@ -145,7 +160,7 @@ interface AppContextType {
   deleteCustomer: (customerId: string) => Promise<void>;
   searchCustomers: (query: string) => CustomerWithBalance[];
   updateTripPaymentStatus: (tripId: string, isPaid: boolean, paymentMode?: string) => Promise<void>;
-  login: (input: LoginInput) => Promise<void>;
+  login: (input: LoginInput) => Promise<LoginResult>;
   signup: (input: SignupInput) => Promise<{ groupCode: string | null }>;
   logout: () => Promise<void>;
   supportLogin: (password: string) => Promise<string>;
@@ -461,15 +476,22 @@ export const AppProvider = ({ children }: AppProviderProps) => {
   }, [user?.id, getToken, refreshData]);
 
   // ── Auth actions ───────────────────────────────────────────────────────
-  const login = async (input: LoginInput): Promise<void> => {
-    const result = await apiRequest<{ token: string; user: AppUser; group: AppGroup }>(
-      '/api/auth/login',
-      { method: 'POST', body: input, token: null },
-    );
+  const login = async (input: LoginInput): Promise<LoginResult> => {
+    const result = await apiRequest<
+      { token: string; user: AppUser; group: AppGroup } | LoginResult
+    >('/api/auth/login', { method: 'POST', body: input, token: null });
+
+    // No token yet — same phone+password matched more than one business. Hand the list back
+    // for AuthPage to show a picker; nothing to store, no session started.
+    if (!('token' in result)) {
+      return result;
+    }
+
     localStorage.setItem(TOKEN_KEY, result.token);
     setUser(result.user);
     setGroup(result.group);
     setCachedMe(result.user, result.group);
+    return {};
   };
 
   const signup = async (input: SignupInput): Promise<{ groupCode: string | null }> => {

@@ -1,4 +1,4 @@
-import type { User, Role } from '@prisma/client';
+import type { User, Group, Role } from '@prisma/client';
 import { prisma, type DbClient } from '../prisma.js';
 
 export function findByGroupAndPhone(
@@ -15,6 +15,17 @@ export function findActiveByGroupAndPhone(
   client: DbClient = prisma,
 ): Promise<User | null> {
   return client.user.findFirst({ where: { groupId, phone, active: true } });
+}
+
+// Login no longer takes a group code, but phone is only unique WITHIN a group
+// (@@unique([groupId, phone]) in schema.prisma) — the same number can legitimately belong to
+// different accounts in different businesses. This is how the login route finds every candidate
+// account for a phone so it can check the submitted password against each of them.
+export function findAllActiveByPhone(
+  phone: string,
+  client: DbClient = prisma,
+): Promise<(User & { group: Group })[]> {
+  return client.user.findMany({ where: { phone, active: true }, include: { group: true } });
 }
 
 export function findActiveAdminByGroupAndPhone(

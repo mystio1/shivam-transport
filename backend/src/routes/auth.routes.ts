@@ -16,7 +16,7 @@ import {
 import { signupLimiter, loginLimiter, forgotPasswordLimiter, resetPasswordLimiter } from '../middleware/rateLimit.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { config } from '../env.js';
-import type { Role, User } from '@prisma/client';
+import type { Role, User, Group } from '@prisma/client';
 
 export const authRouter = Router();
 
@@ -103,22 +103,50 @@ authRouter.post('/login', loginLimiter, async (req, res, next) => {
     const body = req.body ?? {};
     const phone = String(body.phone || '').trim();
     const password = String(body.password || '');
+    // Optional now — a phone number is only unique WITHIN a group (schema's
+    // @@unique([groupId, phone])), so login resolves the account by phone + password alone,
+    // across every group that phone appears in. `groupCode` is still accepted so the picker
+    // below can complete a login it already narrowed down to one specific account.
     const groupCode = normalizeGroupCode(body.groupCode);
 
-    if (!phone || !password || !groupCode) throw new HttpError(400, 'Phone, password and group code are required');
+    if (!phone || !password) throw new HttpError(400, 'Phone and password are required');
 
-    // Deliberately the SAME generic message as a wrong password below — a differentiated
-    // message here let an attacker enumerate valid group codes (fixed as part of this rebuild).
-    const invalidCredentials = () => new HttpError(401, 'Invalid group code, phone number, or password');
+    // Deliberately the SAME generic message in every "no match" case below — a differentiated
+    // message let an attacker enumerate valid phone numbers or group codes (fixed as part of
+    // this rebuild).
+    const invalidCredentials = () => new HttpError(401, 'Invalid phone number or password');
 
-    const group = await groupsRepo.findByCode(groupCode);
-    if (!group) throw invalidCredentials();
+    const candidates: (User & { group: Group })[] = groupCode
+      ? await (async () => {
+          const group = await groupsRepo.findByCode(groupCode);
+          if (!group) return [];
+          const user = await usersRepo.findActiveByGroupAndPhone(group.id, phone);
+          return user ? [{ ...user, group }] : [];
+        })()
+      : await usersRepo.findAllActiveByPhone(phone);
+
+    const matches = candidates.filter((u) => verifyPassword(password, u.passwordHash));
+    if (matches.length === 0) throw invalidCredentials();
+
+    if (matches.length > 1) {
+      // Same phone AND the same password happen to be valid for more than one business — rare
+      // (needs a reused test number plus a reused password), but real: this has already been
+      // seen in production data. Guessing which business the user meant would be a real surprise
+      // (wrong bills, wrong customers on screen), so hand back the short list instead and let the
+      // client show a one-tap picker; its follow-up call includes groupCode, which takes the
+      // single-match branch below. No token is issued yet.
+      res.status(200).json({
+        requiresGroupSelection: true,
+        accounts: matches.map((u) => ({ groupCode: u.group.code, groupName: u.group.name })),
+      });
+      return;
+    }
+
+    const user = matches[0];
+    const group = user.group;
     if (group.frozen) {
       throw new HttpError(423, 'This account has been frozen by our support console. Your data is safe — contact support for recovery.', 'ACCOUNT_FROZEN');
     }
-
-    const user = await usersRepo.findActiveByGroupAndPhone(group.id, phone);
-    if (!user || !verifyPassword(password, user.passwordHash)) throw invalidCredentials();
 
     const token = await issueSession({ id: user.id, groupId: user.groupId, role: user.role }, prisma, {
       userAgent: req.headers['user-agent'], ip: req.ip,

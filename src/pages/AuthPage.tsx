@@ -10,7 +10,7 @@ import {
   Visibility, VisibilityOff, ArrowForward, Mail,
 } from '@mui/icons-material';
 import { useAppContext } from '../context/AppContext';
-import type { SignupInput } from '../context/AppContext';
+import type { LoginAccountChoice, SignupInput } from '../context/AppContext';
 import type { UserRole } from '../types';
 import ForgotPasswordDialog from '../components/ForgotPasswordDialog';
 
@@ -34,6 +34,10 @@ const AuthPage = () => {
   const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  // Login no longer asks for a group code up front. Set only in the rare case where the same
+  // phone + password are valid for more than one business — the user then taps one of these
+  // instead of typing a code.
+  const [accountChoices, setAccountChoices] = useState<LoginAccountChoice[] | null>(null);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -46,8 +50,23 @@ const AuthPage = () => {
         const result = await signup(input);
         if (result.groupCode) setNewGroupCode(result.groupCode);
       } else {
-        await login({ phone, password, groupCode: groupCode || '' });
+        const result = await login({ phone, password });
+        if (result.requiresGroupSelection && result.accounts) {
+          setAccountChoices(result.accounts);
+        }
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Authentication failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChooseAccount = async (choice: LoginAccountChoice) => {
+    setError('');
+    setLoading(true);
+    try {
+      await login({ phone, password, groupCode: choice.groupCode });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed');
     } finally {
@@ -414,6 +433,62 @@ const AuthPage = () => {
                 boxShadow: '0 12px 40px rgba(0, 0, 0, 0.12)',
               }}
             >
+              {accountChoices ? (
+                <Stack spacing={1.8}>
+                  <Box>
+                    <Typography variant="h4" sx={{ fontWeight: 800, color: '#0F172A', fontSize: '1.65rem', letterSpacing: '-0.4px', fontFamily: 'inherit' }}>
+                      Choose your business
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#475569', mt: 0.3, fontWeight: 500, fontSize: '0.82rem', fontFamily: 'inherit' }}>
+                      This phone number and password are used on more than one account.
+                    </Typography>
+                  </Box>
+
+                  {error && (
+                    <Alert severity="error" sx={{ borderRadius: '10px', fontSize: '0.82rem', py: 0.5 }}>
+                      {error}
+                    </Alert>
+                  )}
+
+                  {accountChoices.map(choice => (
+                    <Button
+                      key={choice.groupCode}
+                      onClick={() => handleChooseAccount(choice)}
+                      disabled={loading}
+                      fullWidth
+                      variant="outlined"
+                      sx={{
+                        justifyContent: 'space-between',
+                        bgcolor: 'rgba(255, 255, 255, 0.88)',
+                        color: '#0F172A',
+                        fontWeight: 700,
+                        fontSize: '0.9rem',
+                        height: 50,
+                        borderRadius: '10px',
+                        borderColor: 'rgba(148, 163, 184, 0.6)',
+                        textTransform: 'none',
+                        fontFamily: 'inherit',
+                        '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.98)', borderColor: 'rgba(148, 163, 184, 0.9)' },
+                      }}
+                      endIcon={<ArrowForward sx={{ fontSize: 18 }} />}
+                    >
+                      {choice.groupName}
+                    </Button>
+                  ))}
+
+                  <Box sx={{ textAlign: 'center', pt: 0.2 }}>
+                    <Link
+                      component="button"
+                      type="button"
+                      onClick={() => { setAccountChoices(null); setError(''); }}
+                      underline="hover"
+                      sx={{ color: '#2563EB', fontWeight: 600, fontSize: '0.82rem', fontFamily: 'inherit' }}
+                    >
+                      Back to login
+                    </Link>
+                  </Box>
+                </Stack>
+              ) : (
               <form onSubmit={handleSubmit}>
                 <Stack spacing={1.8}>
                   <Box>
@@ -768,6 +843,7 @@ const AuthPage = () => {
                   </Box>
                 </Stack>
               </form>
+              )}
             </Paper>
           </Box>
         </Box>

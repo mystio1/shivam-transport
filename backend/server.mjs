@@ -631,24 +631,44 @@ async function handleApi(req, res) {
     const body      = await readBody(req);
     const phone     = String(body.phone || '').trim();
     const password  = String(body.password || '');
+    // Optional now — a phone number is only unique within a group here (db.users is keyed by
+    // groupCode+phone, never globally), so login resolves the account by phone + password alone
+    // across every group that phone appears in. Still accepted so the picker below can complete
+    // a login it already narrowed down to one specific account.
     const groupCode = normalizeGroupCode(body.groupCode);
 
-    if (!phone || !password || !groupCode)
-      return send(res, 400, { message: 'Phone, password and group code are required' });
+    if (!phone || !password)
+      return send(res, 400, { message: 'Phone and password are required' });
 
-    const db    = await readDb();
-    const group = db.groups.find(g => g.code === groupCode);
-    if (!group) return send(res, 401, { message: 'Invalid group code' });
-    if (group.frozen) {
+    const db = await readDb();
+
+    const candidates = groupCode
+      ? db.users.filter(u => u.groupCode === groupCode && u.phone === phone && u.active)
+      : db.users.filter(u => u.phone === phone && u.active);
+    const matches = candidates.filter(u => verifyPassword(password, u.passwordHash));
+
+    if (matches.length === 0)
+      return send(res, 401, { message: 'Invalid phone number or password' });
+
+    if (matches.length > 1) {
+      // Same phone AND the same password valid in more than one business — rare, but real (see
+      // the identical comment in backend/src/routes/auth.routes.ts). Hand back the short list
+      // instead of guessing; the client's follow-up call includes groupCode.
+      const accounts = matches.map(u => {
+        const g = db.groups.find(g => g.code === u.groupCode);
+        return { groupCode: u.groupCode, groupName: g ? g.name : u.groupCode };
+      });
+      return send(res, 200, { requiresGroupSelection: true, accounts });
+    }
+
+    const user  = matches[0];
+    const group = db.groups.find(g => g.code === user.groupCode);
+    if (group && group.frozen) {
       return send(res, 423, {
         message: 'This account has been frozen by our support console. Your data is safe — contact support for recovery.',
         code: 'ACCOUNT_FROZEN',
       });
     }
-
-    const user = db.users.find(u => u.groupCode === groupCode && u.phone === phone && u.active);
-    if (!user || !verifyPassword(password, user.passwordHash))
-      return send(res, 401, { message: 'Invalid phone number or password' });
 
     const token = createSessionToken(user.id, user.groupCode, user.role);
     return send(res, 200, { token, user: safeUser(user), group });
