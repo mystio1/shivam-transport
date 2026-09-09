@@ -75,12 +75,15 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }: SidebarProps) => {
         {/* Transparent PNG (cropped tight, alpha background) carrying the full
             "Transport Management / Powered by TrackMarg" wordmark, so it floats directly on
             the dark drawer background — same treatment as the original Shivam Transport logo
-            it replaced. */}
+            it replaced. drop-shadow (not box-shadow) so the glow follows the logo's actual
+            silhouette instead of its rectangular bounding box — a soft white halo, since a dark
+            shadow disappears against this already-dark sidebar and some of the logo's own dark
+            outline edges need light behind them to read clearly. */}
         <Box
           component="img"
           src="/logo.png"
           alt="Transport Management logo"
-          sx={{ width: '100%', maxWidth: 180, filter: 'drop-shadow(0px 4px 8px rgba(0,0,0,0.5))' }}
+          sx={{ width: '100%', maxWidth: 180, filter: 'drop-shadow(0 0 8px rgba(255,255,255,0.55))' }}
         />
       </Box>
       <Divider sx={{ borderColor: 'divider' }} />
