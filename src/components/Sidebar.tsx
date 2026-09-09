@@ -72,18 +72,27 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }: SidebarProps) => {
           pt: 'calc(24px + env(safe-area-inset-top))',
         }}
       >
-        <Box 
-          component="img"
-          src="/logo.png"
-          alt="Brand Logo"
-          sx={{ width: '100%', maxWidth: 180, mb: 2, filter: 'drop-shadow(0px 4px 8px rgba(0,0,0,0.5))' }}
-        />
-        <Typography variant="h6" sx={{ color: 'text.primary', fontWeight: 800, textAlign: 'center', letterSpacing: '0.5px' }}>
-          SHIVAM
-        </Typography>
-        <Typography variant="caption" sx={{ color: '#F0B90B', fontWeight: 600, letterSpacing: '1px' }}>
-          TRANSPORT
-        </Typography>
+        {/* The logo file has its own solid light background (no transparency) and already
+            carries the "Transport Management / Powered by TrackMarg" wordmark, so it's framed
+            in a white card here instead of floating directly on the dark drawer background —
+            otherwise it reads as a stray white square rather than a logo. */}
+        <Box
+          sx={{
+            width: '100%',
+            maxWidth: 180,
+            p: 1.5,
+            borderRadius: 3,
+            bgcolor: '#fff',
+            boxShadow: '0px 4px 12px rgba(0,0,0,0.35)',
+          }}
+        >
+          <Box
+            component="img"
+            src="/logo.jpg"
+            alt="Transport Management logo"
+            sx={{ width: '100%', display: 'block', borderRadius: 1.5 }}
+          />
+        </Box>
       </Box>
       <Divider sx={{ borderColor: 'divider' }} />
       <List sx={{ px: 2, pt: 3 }}>

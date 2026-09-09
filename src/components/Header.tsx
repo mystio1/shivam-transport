@@ -70,14 +70,9 @@ const Header = ({ handleDrawerToggle }: HeaderProps) => {
               <MenuIcon />
             </IconButton>
           )}
-          <Typography
-            variant="h6"
-            noWrap
-            component="div"
-            sx={{ display: 'block', '@media (min-width:1024px)': { display: 'none' }, color: 'text.primary', fontWeight: 800 }}
-          >
-            SHIVAM
-          </Typography>
+          {/* No text brand label here on mobile (the old "SHIVAM" didn't fit "TRANSPORT
+              MANAGEMENT" either) — the hamburger already opens the sidebar, which carries the
+              full logo one tap away, so this bar stays hamburger + spacer + actions. */}
           <Box sx={{ flexGrow: 1 }} />
 
           {user && (
