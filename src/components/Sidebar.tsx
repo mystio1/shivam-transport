@@ -72,18 +72,25 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }: SidebarProps) => {
           pt: 'calc(24px + env(safe-area-inset-top))',
         }}
       >
-        {/* Transparent PNG (cropped tight, alpha background) carrying the full
-            "Transport Management / Powered by TrackMarg" wordmark, so it floats directly on
-            the dark drawer background — same treatment as the original Shivam Transport logo
-            it replaced. drop-shadow (not box-shadow) so the glow follows the logo's actual
-            silhouette instead of its rectangular bounding box — a soft white halo, since a dark
-            shadow disappears against this already-dark sidebar and some of the logo's own dark
-            outline edges need light behind them to read clearly. */}
+        {/* Transparent PNGs (cropped tight, alpha background) carrying the full
+            "Transport Management / Powered by TrackMarg" wordmark, so they float directly on
+            the drawer background — one per theme mode, since a single treatment doesn't read
+            well in both: logo.png is designed for the dark sidebar and gets a soft white halo
+            (a dark shadow would disappear against an already-dark background); logo-light.png
+            is designed for the light sidebar and gets a conventional soft dark shadow instead,
+            mirroring the same idea in reverse. drop-shadow (not box-shadow) so the glow follows
+            the logo's actual silhouette instead of its rectangular bounding box. */}
         <Box
           component="img"
-          src="/logo.png"
+          src={theme.palette.mode === 'light' ? '/logo-light.png' : '/logo.png'}
           alt="Transport Management logo"
-          sx={{ width: '100%', maxWidth: 180, filter: 'drop-shadow(0 0 8px rgba(255,255,255,0.55))' }}
+          sx={{
+            width: '100%',
+            maxWidth: 180,
+            filter: theme.palette.mode === 'light'
+              ? 'drop-shadow(0 2px 6px rgba(15,23,42,0.25))'
+              : 'drop-shadow(0 0 8px rgba(255,255,255,0.55))',
+          }}
         />
       </Box>
       <Divider sx={{ borderColor: 'divider' }} />
