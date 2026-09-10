@@ -28,7 +28,10 @@ services:
     # DIRECT_URL — see prisma/migrations/ — so by the time a new migration ships, it's already
     # applied to the database before this ever redeploys.
     startCommand: node backend/dist/index.js
-    healthCheckPath: /api/health
+    # Bare GET /health (backend/src/routes/health.routes.ts's rootHealthRouter) — mounted before
+    # every other middleware in app.ts, so it's the fastest, most dependency-free path available.
+    # Unrelated to /api/health, which the frontend's useKeepAlive hook still pings separately.
+    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production

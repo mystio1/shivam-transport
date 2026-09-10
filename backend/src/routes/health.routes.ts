@@ -3,7 +3,6 @@ import { now } from '../services/util.js';
 
 export const healthRouter = Router();
 
-// Render uses healthCheckPath: /api/health to determine if the process is alive.
 // This endpoint MUST stay fast and never block on DB I/O — if the database is
 // down we still want Render to see us as "up" (a healthy-but-DB-down process
 // restarting would only make things worse, see routes/index.ts for context).
@@ -16,4 +15,15 @@ healthRouter.get('/health', (_req, res) => {
     uptime: Math.floor(process.uptime()),        // seconds since server start
     memMb: Math.round(process.memoryUsage().rss / 1024 / 1024), // RSS in MB
   });
+});
+
+// Bare GET /health at the app root (not under /api) — mounted first in app.ts, before helmet/
+// CORS/json-body-parsing/the API router, so nothing can ever delay or block it: no auth, no
+// rate limit, no DB call, no dependency on any other middleware initializing correctly. Exists
+// specifically so Render's Health Check Path field and an external uptime monitor can be pointed
+// at a single, minimal, always-fast path. /api/health above is unrelated and unchanged — the
+// frontend's keep-alive ping and any existing Render config keep using that one.
+export const rootHealthRouter = Router();
+rootHealthRouter.get('/health', (_req, res) => {
+  res.status(200).json({ status: 'ok' });
 });
